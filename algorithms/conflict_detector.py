@@ -4,11 +4,12 @@ from typing import Optional
 import numpy as np
 
 
+# ==========================================================================
+# PREDICTED CONFLICT
+# ==========================================================================
+
 @dataclass
 class PredictedConflict:
-    """
-    Predicted future conflict between two AMRs.
-    """
 
     robot_a: str
     robot_b: str
@@ -25,19 +26,26 @@ class PredictedConflict:
     conflict_type: str = "TRAJECTORY"
 
 
+# ==========================================================================
+# CONFLICT DETECTOR
+# ==========================================================================
+
 class ConflictDetector:
     """
-    NEXUS predictive multi-robot conflict detector.
+    Lightweight predictive conflict detector.
 
-    Predicts each robot's future motion and checks for
-    spatiotemporal safety-distance violations.
+    Each robot's remaining A* path is projected forward at approximately
+    max_speed.
+
+    A conflict is raised when the predicted distance between two moving
+    robots falls below safety_distance.
     """
 
     def __init__(
         self,
-        prediction_horizon=4.0,
+        prediction_horizon=3.0,
         prediction_dt=0.2,
-        safety_distance=0.90,
+        safety_distance=0.95,
     ):
 
         self.prediction_horizon = (
@@ -52,36 +60,63 @@ class ConflictDetector:
             safety_distance
         )
 
-    # ==================================================================
+    # ======================================================================
     # TRAJECTORY PREDICTION
-    # ==================================================================
+    # ======================================================================
 
     def predict_trajectory(
         self,
         agent,
     ):
-        """
-        Predict future positions.
-
-        Normal robot:
-            move along remaining A* path.
-
-        Yielding robot:
-            move toward its assigned yield point,
-            then remain stationary.
-
-        This prevents the detector from repeatedly assuming
-        that a yielding robot is still travelling through
-        the conflict zone.
-        """
 
         position = (
             agent.state.position.copy()
         )
 
-        # ----------------------------------------------------------
-        # NO PATH
-        # ----------------------------------------------------------
+        # A robot that is already stopped should not generate a new
+        # moving-vs-moving conflict.
+
+        if getattr(
+            agent,
+            "stopped",
+            False,
+        ):
+
+            times = np.arange(
+                0.0,
+                self.prediction_horizon
+                + self.prediction_dt,
+                self.prediction_dt,
+            )
+
+            return [
+                (
+                    float(t),
+                    position.copy(),
+                )
+                for t in times
+            ]
+
+        if agent.intent in {
+            "STOPPED",
+            "IDLE",
+            "ARRIVED",
+        }:
+
+            times = np.arange(
+                0.0,
+                self.prediction_horizon
+                + self.prediction_dt,
+                self.prediction_dt,
+            )
+
+            return [
+                (
+                    float(t),
+                    position.copy(),
+                )
+                for t in times
+            ]
 
         if (
             not agent.planned_path
@@ -96,100 +131,26 @@ class ConflictDetector:
                 )
             ]
 
-        speed = max(
-            agent.max_speed,
-            1e-6,
-        )
+        speed = agent.max_speed
 
-        # ----------------------------------------------------------
-        # YIELDING ROBOT
-        # ----------------------------------------------------------
+        if speed <= 0:
 
-        if agent.yielding:
-
-            if agent.yield_position is None:
-
-                return [
-                    (
-                        0.0,
-                        position.copy(),
-                    )
-                ]
-
-            yield_position = np.asarray(
-                agent.yield_position,
-                dtype=float,
-            )
-
-            distance_to_yield = np.linalg.norm(
-                yield_position
-                - position
-            )
-
-            times = np.arange(
-                0.0,
-                self.prediction_horizon
-                + self.prediction_dt,
-                self.prediction_dt,
-            )
-
-            predictions = []
-
-            for future_time in times:
-
-                travelled = (
-                    speed
-                    * future_time
+            return [
+                (
+                    0.0,
+                    position.copy(),
                 )
+            ]
 
-                if travelled >= distance_to_yield:
+        # ------------------------------------------------------------------
+        # Remaining path
+        # ------------------------------------------------------------------
 
-                    predicted_position = (
-                        yield_position.copy()
-                    )
-
-                else:
-
-                    if distance_to_yield < 1e-8:
-
-                        predicted_position = (
-                            position.copy()
-                        )
-
-                    else:
-
-                        ratio = (
-                            travelled
-                            / distance_to_yield
-                        )
-
-                        predicted_position = (
-                            position
-                            + ratio
-                            * (
-                                yield_position
-                                - position
-                            )
-                        )
-
-                predictions.append(
-                    (
-                        float(future_time),
-                        predicted_position,
-                    )
-                )
-
-            return predictions
-
-        # ----------------------------------------------------------
-        # NORMAL A* TRAJECTORY
-        # ----------------------------------------------------------
-
-        remaining_points = [
+        path = [
             position.copy()
         ]
 
-        remaining_points.extend(
+        path.extend(
             [
                 np.asarray(
                     point,
@@ -201,22 +162,24 @@ class ConflictDetector:
             ]
         )
 
-        # ----------------------------------------------------------
-        # Remove duplicate points
-        # ----------------------------------------------------------
+        # Remove duplicate points.
 
-        path = [
-            remaining_points[0]
+        cleaned_path = [
+            path[0]
         ]
 
-        for point in remaining_points[1:]:
+        for point in path[1:]:
 
             if np.linalg.norm(
                 point
-                - path[-1]
+                - cleaned_path[-1]
             ) > 1e-8:
 
-                path.append(point)
+                cleaned_path.append(
+                    point
+                )
+
+        path = cleaned_path
 
         if len(path) < 2:
 
@@ -227,9 +190,9 @@ class ConflictDetector:
                 )
             ]
 
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
         # Segment lengths
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
 
         segment_lengths = []
 
@@ -237,13 +200,11 @@ class ConflictDetector:
             len(path) - 1
         ):
 
-            length = np.linalg.norm(
-                path[i + 1]
-                - path[i]
-            )
-
             segment_lengths.append(
-                length
+                np.linalg.norm(
+                    path[i + 1]
+                    - path[i]
+                )
             )
 
         cumulative = [0.0]
@@ -257,9 +218,9 @@ class ConflictDetector:
 
         total_length = cumulative[-1]
 
-        # ----------------------------------------------------------
-        # Prediction
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
+        # Predict
+        # ------------------------------------------------------------------
 
         predictions = []
 
@@ -272,28 +233,22 @@ class ConflictDetector:
 
         for future_time in times:
 
-            travelled_distance = (
+            distance = (
                 speed
                 * future_time
             )
 
-            if (
-                travelled_distance
-                >= total_length
-            ):
+            if distance >= total_length:
 
                 predictions.append(
                     (
-                        float(
-                            future_time
-                        ),
+                        float(future_time),
                         path[-1].copy(),
                     )
                 )
 
                 continue
 
-            # Find containing segment.
             for segment_index in range(
                 len(segment_lengths)
             ):
@@ -312,7 +267,7 @@ class ConflictDetector:
 
                 if (
                     start_distance
-                    <= travelled_distance
+                    <= distance
                     <= end_distance
                 ):
 
@@ -322,17 +277,14 @@ class ConflictDetector:
                         ]
                     )
 
-                    if (
-                        segment_length
-                        < 1e-8
-                    ):
+                    if segment_length < 1e-8:
 
                         ratio = 0.0
 
                     else:
 
                         ratio = (
-                            travelled_distance
+                            distance
                             - start_distance
                         ) / segment_length
 
@@ -344,21 +296,16 @@ class ConflictDetector:
                         segment_index + 1
                     ]
 
-                    predicted_position = (
+                    predicted = (
                         start
                         + ratio
-                        * (
-                            end
-                            - start
-                        )
+                        * (end - start)
                     )
 
                     predictions.append(
                         (
-                            float(
-                                future_time
-                            ),
-                            predicted_position,
+                            float(future_time),
+                            predicted,
                         )
                     )
 
@@ -366,25 +313,31 @@ class ConflictDetector:
 
         return predictions
 
-    # ==================================================================
+    # ======================================================================
     # PAIRWISE CONFLICT
-    # ==================================================================
+    # ======================================================================
 
     def detect_pair(
         self,
         agent_a,
         agent_b,
     ) -> Optional[PredictedConflict]:
-        """
-        Predict whether two robots will violate the
-        safety distance within the prediction horizon.
-        """
 
-        # Do not generate a conflict between two robots
-        # that have already completed their tasks.
-        if (
-            agent_a.intent == "ARRIVED"
-            and agent_b.intent == "ARRIVED"
+        # If either robot is already stopped, do not create another
+        # moving-vs-moving negotiation.
+
+        if getattr(
+            agent_a,
+            "stopped",
+            False,
+        ):
+
+            return None
+
+        if getattr(
+            agent_b,
+            "stopped",
+            False,
         ):
 
             return None
@@ -406,10 +359,6 @@ class ConflictDetector:
             len(trajectory_b),
         )
 
-        minimum_distance = float(
-            "inf"
-        )
-
         for i in range(count):
 
             time_a, position_a = (
@@ -420,19 +369,9 @@ class ConflictDetector:
                 trajectory_b[i]
             )
 
-            future_time = min(
-                time_a,
-                time_b,
-            )
-
             distance = np.linalg.norm(
                 position_a
                 - position_b
-            )
-
-            minimum_distance = min(
-                minimum_distance,
-                distance,
             )
 
             if (
@@ -449,14 +388,13 @@ class ConflictDetector:
                     robot_a=agent_a.robot_id,
                     robot_b=agent_b.robot_id,
                     time_to_conflict=float(
-                        future_time
+                        min(
+                            time_a,
+                            time_b,
+                        )
                     ),
-                    position_a=(
-                        position_a.copy()
-                    ),
-                    position_b=(
-                        position_b.copy()
-                    ),
+                    position_a=position_a.copy(),
+                    position_b=position_b.copy(),
                     conflict_position=(
                         conflict_position.copy()
                     ),
@@ -467,9 +405,9 @@ class ConflictDetector:
 
         return None
 
-    # ==================================================================
-    # FLEET CONFLICTS
-    # ==================================================================
+    # ======================================================================
+    # ALL CONFLICTS
+    # ======================================================================
 
     def detect_all(
         self,
@@ -499,11 +437,5 @@ class ConflictDetector:
                     conflicts.append(
                         conflict
                     )
-
-        # Process the most urgent conflicts first.
-        conflicts.sort(
-            key=lambda conflict:
-            conflict.time_to_conflict
-        )
 
         return conflicts

@@ -14,43 +14,61 @@ from communication.p2p import P2PNetwork
 # ==========================================================================
 
 ROBOT_CONFIG = [
-    ("R1", np.array([2.0, 3.0]), np.array([28.0, 17.0])),
-    ("R2", np.array([2.0, 7.0]), np.array([28.0, 13.0])),
-    ("R3", np.array([2.0, 11.0]), np.array([28.0, 9.0])),
+    (
+        "R1",
+        np.array([2.0, 3.0]),
+        np.array([28.0, 17.0]),
+    ),
 
-    ("R4", np.array([28.0, 17.0]), np.array([2.0, 3.0])),
-    ("R5", np.array([28.0, 13.0]), np.array([2.0, 7.0])),
-    ("R6", np.array([28.0, 9.0]), np.array([2.0, 11.0])),
+    (
+        "R2",
+        np.array([2.0, 7.0]),
+        np.array([28.0, 13.0]),
+    ),
+
+    (
+        "R3",
+        np.array([2.0, 11.0]),
+        np.array([28.0, 9.0]),
+    ),
+
+    (
+        "R4",
+        np.array([28.0, 17.0]),
+        np.array([2.0, 3.0]),
+    ),
+
+    (
+        "R5",
+        np.array([28.0, 13.0]),
+        np.array([2.0, 7.0]),
+    ),
+
+    (
+        "R6",
+        np.array([28.0, 9.0]),
+        np.array([2.0, 11.0]),
+    ),
 ]
 
 
 # ==========================================================================
-# HELPERS
+# COORDINATION PARAMETERS
 # ==========================================================================
 
-def reservation_is_stored(reservation, reservations):
-    """
-    Check whether a specific Reservation object is still stored.
+# Once the priority robot is this far beyond the conflict point,
+# release the stopped robot.
 
-    IMPORTANT:
-    Do NOT use:
+CLEARANCE_DISTANCE = 1.5
 
-        reservation in reservations
+# Hard physical safety stop.
+#
+# This is independent of prediction/negotiation.
+# If two robots actually get this close, both stop.
+#
+# We intentionally keep this separate from the normal STOP/GO logic.
 
-    because Reservation contains NumPy arrays. Dataclass equality then
-    compares arrays element-by-element and can raise:
-
-        ValueError:
-        The truth value of an array with more than one element is ambiguous.
-
-    Identity comparison is safe because we want to know whether this exact
-    reservation object is still active.
-    """
-
-    return any(
-        stored_reservation is reservation
-        for stored_reservation in reservations
-    )
+HARD_SAFETY_DISTANCE = 0.72
 
 
 # ==========================================================================
@@ -60,7 +78,11 @@ def reservation_is_stored(reservation, reservations):
 def main():
 
     print("=" * 72)
-    print("             NEXUS ACTIVE COORDINATION")
+
+    print(
+        "                 NEXUS SIMPLE COORDINATION"
+    )
+
     print("=" * 72)
 
     # ======================================================================
@@ -78,17 +100,19 @@ def main():
     planner = NEXUSPlanner()
 
     detector = ConflictDetector(
-        prediction_horizon=4.0,
+        prediction_horizon=3.0,
         prediction_dt=0.2,
-        safety_distance=0.90,
+        safety_distance=0.95,
     )
 
-    negotiation = NegotiationManager()
+    negotiation = NegotiationManager(
+        eta_margin=0.25
+    )
 
     network = P2PNetwork()
 
     # ======================================================================
-    # CREATE ROBOT AGENTS
+    # ROBOT AGENTS
     # ======================================================================
 
     agents = []
@@ -97,7 +121,9 @@ def main():
         robot_id,
         start,
         goal,
-    ) in enumerate(ROBOT_CONFIG):
+    ) in enumerate(
+        ROBOT_CONFIG
+    ):
 
         agent = RobotAgent(
             robot_id=robot_id,
@@ -126,15 +152,41 @@ def main():
         )
 
     print()
-    print("Communication: P2P")
-    print("Planning: A*")
-    print("Conflict prediction: 4.0 s horizon")
-    print("Safety distance: 0.90 m")
-    print("Coordination: Reservation-aware negotiation")
+
+    print(
+        "Communication: P2P"
+    )
+
+    print(
+        "Planning: A*"
+    )
+
+    print(
+        "Conflict prediction: 3.0 s horizon"
+    )
+
+    print(
+        "Coordination: STOP / GO"
+    )
+
+    print(
+        "Priority: ETA + robot-ID tie-break"
+    )
+
+    print(
+        f"Clearance distance: "
+        f"{CLEARANCE_DISTANCE:.2f} m"
+    )
+
+    print(
+        f"Hard safety distance: "
+        f"{HARD_SAFETY_DISTANCE:.2f} m"
+    )
+
     print()
 
     # ======================================================================
-    # TRAJECTORY HISTORY
+    # TRAJECTORIES
     # ======================================================================
 
     trajectories = {
@@ -143,17 +195,30 @@ def main():
     }
 
     # ======================================================================
-    # ACTIVE NEGOTIATIONS
+    # ACTIVE CONFLICTS
     #
-    # Maps:
+    # pair -> information about who has priority and where the conflict is.
     #
-    #     (robot_a, robot_b) -> Reservation object
+    # Example:
     #
-    # The Reservation object itself is retained so that we can use identity
-    # comparison rather than NumPy-array-based dataclass equality.
+    # ("R1", "R4") -> {
+    #     "winner": R1,
+    #     "loser": R4,
+    #     "position": [10, 17]
+    # }
     # ======================================================================
 
-    active_negotiations = {}
+    active_conflicts = {}
+
+    # ======================================================================
+    # METRICS
+    # ======================================================================
+
+    collision_count = 0
+
+    conflict_count = 0
+
+    stop_events = 0
 
     # ======================================================================
     # SIMULATION
@@ -163,10 +228,12 @@ def main():
 
     max_steps = 600
 
-    for step in range(max_steps):
+    for step in range(
+        max_steps
+    ):
 
         # ------------------------------------------------------------------
-        # Update all agents
+        # Update state.
         # ------------------------------------------------------------------
 
         for agent in agents:
@@ -182,52 +249,62 @@ def main():
             )
 
         # ------------------------------------------------------------------
-        # Remove expired reservations
-        # ------------------------------------------------------------------
-
-        negotiation.reservations.clear_expired(
-            simulation_time
-        )
-
-        # ------------------------------------------------------------------
-        # Clean active negotiation references
-        #
-        # IMPORTANT:
-        #
-        # We use object identity here:
-        #
-        #     stored_reservation is reservation
-        #
-        # instead of:
-        #
-        #     reservation in reservations
-        #
-        # because Reservation contains NumPy arrays.
-        # ------------------------------------------------------------------
-
-        for pair in list(active_negotiations.keys()):
-
-            reservation = active_negotiations[pair]
-
-            # If the exact reservation object is still present, keep
-            # the pair locked against repeated negotiation.
-            if reservation_is_stored(
-                reservation,
-                negotiation.reservations.reservations,
-            ):
-                continue
-
-            # Reservation has expired / been removed.
-            del active_negotiations[pair]
-
-        # ------------------------------------------------------------------
-        # P2P state exchange
+        # P2P broadcast.
         # ------------------------------------------------------------------
 
         network.broadcast_all()
 
         # ------------------------------------------------------------------
-        # Predict future conflicts
+        # Release completed conflicts.
+        #
+        # The winner must physically move beyond the conflict region.
+        # ------------------------------------------------------------------
+
+        for pair in list(
+            active_conflicts.keys()
+        ):
+
+            info = (
+                active_conflicts[pair]
+            )
+
+            winner = info["winner"]
+            loser = info["loser"]
+
+            conflict_position = (
+                info["position"]
+            )
+
+            winner_distance = np.linalg.norm(
+                winner.state.position
+                - conflict_position
+            )
+
+            # --------------------------------------------------------------
+            # Winner has cleared the region.
+            # --------------------------------------------------------------
+
+            if (
+                winner_distance
+                >= CLEARANCE_DISTANCE
+            ):
+
+                loser.resume()
+
+                del active_conflicts[
+                    pair
+                ]
+
+                print(
+                    f"[T={simulation_time:5.1f}s] "
+                    f"CONFLICT CLEARED: "
+                    f"{winner.robot_id} passed "
+                    f"{pair} -> "
+                    f"{loser.robot_id} RESUMES"
+                )
+
+        # ------------------------------------------------------------------
+        # Detect new predicted conflicts.
         # ------------------------------------------------------------------
 
         conflicts = detector.detect_all(
@@ -235,7 +312,7 @@ def main():
         )
 
         # ------------------------------------------------------------------
-        # Process predicted conflicts
+        # Process conflicts.
         # ------------------------------------------------------------------
 
         for conflict in conflicts:
@@ -250,32 +327,15 @@ def main():
             )
 
             # --------------------------------------------------------------
-            # Check whether this pair already has an active negotiation.
-            #
-            # We deliberately use the reservation object's exit_time
-            # instead of equality against a NumPy-containing dataclass.
+            # Already coordinated.
             # --------------------------------------------------------------
 
-            if pair in active_negotiations:
+            if pair in active_conflicts:
 
-                reservation = active_negotiations[pair]
-
-                if (
-                    simulation_time
-                    <= reservation.exit_time
-                ):
-
-                    continue
-
-                # The reservation's time has elapsed.
-                #
-                # Remove it from active pair tracking. The reservation
-                # manager itself is responsible for removing expired
-                # reservations through clear_expired().
-                del active_negotiations[pair]
+                continue
 
             # --------------------------------------------------------------
-            # Find actual RobotAgent objects.
+            # Find agents.
             # --------------------------------------------------------------
 
             agent_a = next(
@@ -293,28 +353,37 @@ def main():
             )
 
             # --------------------------------------------------------------
-            # NEGOTIATION
+            # Ignore if either robot is already stopped for another
+            # conflict.
+            #
+            # This prevents contradictory commands such as:
+            #
+            # R3 stops for R2
+            # R3 immediately becomes winner against R6
+            # R3 starts moving
+            #
+            # A robot already waiting simply remains waiting.
+            # --------------------------------------------------------------
+
+            if (
+                agent_a.stopped
+                or agent_b.stopped
+            ):
+
+                continue
+
+            # --------------------------------------------------------------
+            # NEGOTIATE
             # --------------------------------------------------------------
 
             (
                 winner_decision,
                 loser_decision,
-                reservation,
             ) = negotiation.negotiate(
                 agent_a,
                 agent_b,
                 conflict,
-                simulation_time,
             )
-
-            # --------------------------------------------------------------
-            # IMPORTANT:
-            #
-            # winner_decision / loser_decision are NegotiationDecision
-            # objects, not RobotAgent objects.
-            #
-            # Retrieve the corresponding RobotAgent using robot_id.
-            # --------------------------------------------------------------
 
             winner_agent = next(
                 agent
@@ -331,43 +400,45 @@ def main():
             )
 
             # --------------------------------------------------------------
-            # WINNER
+            # STOP LOSER
             # --------------------------------------------------------------
 
-            winner_agent.clear_yield()
-
-            # --------------------------------------------------------------
-            # LOSER
-            # --------------------------------------------------------------
-
-            loser_agent.set_yield(
-                yielding_to=winner_agent.robot_id,
-                yield_until=reservation.exit_time,
-                yield_position=(
-                    conflict.conflict_position
-                ),
+            loser_agent.stop(
+                reason=(
+                    f"WAIT_FOR_{winner_agent.robot_id}"
+                )
             )
 
             # --------------------------------------------------------------
-            # Store active negotiation.
+            # Register active conflict.
             # --------------------------------------------------------------
 
-            active_negotiations[
+            active_conflicts[
                 pair
-            ] = reservation
+            ] = {
+                "winner": winner_agent,
+                "loser": loser_agent,
+                "position": (
+                    conflict.conflict_position.copy()
+                ),
+            }
+
+            conflict_count += 1
+            stop_events += 1
 
             # --------------------------------------------------------------
-            # Diagnostics
+            # Diagnostics.
             # --------------------------------------------------------------
 
             print()
+
             print(
                 "-" * 72
             )
 
             print(
                 f"[T={simulation_time:5.1f}s] "
-                f"CONFLICT DETECTED"
+                f"CONFLICT"
             )
 
             print(
@@ -377,7 +448,7 @@ def main():
             )
 
             print(
-                f"   Conflict position: "
+                f"   Conflict point: "
                 f"("
                 f"{conflict.conflict_position[0]:.2f}, "
                 f"{conflict.conflict_position[1]:.2f}"
@@ -385,7 +456,7 @@ def main():
             )
 
             print(
-                f"   Predicted minimum distance: "
+                f"   Predicted distance: "
                 f"{conflict.minimum_distance:.2f} m"
             )
 
@@ -400,38 +471,71 @@ def main():
             )
 
             print(
-                f"   YIELD:   "
+                f"   STOP:    "
                 f"{loser_agent.robot_id}"
             )
 
             print(
-                f"   Reservation: "
-                f"{reservation.entry_time:.2f}s"
-                f" -> "
-                f"{reservation.exit_time:.2f}s"
+                f"   Reason: "
+                f"{winner_decision.reason}"
             )
-
-            # --------------------------------------------------------------
-            # If the reservation implementation exposes a resource radius,
-            # print it when available.
-            # --------------------------------------------------------------
-
-            if hasattr(
-                reservation,
-                "zone_radius",
-            ):
-
-                print(
-                    f"   Zone radius: "
-                    f"{reservation.zone_radius:.2f} m"
-                )
 
             print(
                 "-" * 72
             )
 
         # ------------------------------------------------------------------
-        # Generate robot actions
+        # HARD SAFETY CHECK
+        #
+        # This is intentionally simple.
+        #
+        # If two robots actually get too close, stop both.
+        #
+        # This is a safety fallback, NOT the coordination algorithm.
+        # ------------------------------------------------------------------
+
+        for i in range(
+            len(agents)
+        ):
+
+            for j in range(
+                i + 1,
+                len(agents),
+            ):
+
+                agent_a = agents[i]
+                agent_b = agents[j]
+
+                distance = np.linalg.norm(
+                    agent_a.state.position
+                    - agent_b.state.position
+                )
+
+                if (
+                    distance
+                    < HARD_SAFETY_DISTANCE
+                ):
+
+                    # If they are already stopped due to coordination,
+                    # don't count it as a new collision event.
+
+                    if (
+                        not agent_a.stopped
+                        or not agent_b.stopped
+                    ):
+
+                        collision_count += 1
+
+                    agent_a.stop(
+                        reason="HARD_SAFETY"
+                    )
+
+                    agent_b.stop(
+                        reason="HARD_SAFETY"
+                    )
+
+        # ------------------------------------------------------------------
+        # Generate actions.
         # ------------------------------------------------------------------
 
         actions = [
@@ -440,13 +544,15 @@ def main():
         ]
 
         # ------------------------------------------------------------------
-        # Execute NEXUS commands
+        # Execute.
         # ------------------------------------------------------------------
 
-        env.step(actions)
+        env.step(
+            actions
+        )
 
         # ------------------------------------------------------------------
-        # Diagnostics
+        # Status.
         # ------------------------------------------------------------------
 
         if step % 20 == 0:
@@ -465,14 +571,14 @@ def main():
             )
 
         # ------------------------------------------------------------------
-        # Render
+        # Render.
         # ------------------------------------------------------------------
 
         if step % 2 == 0:
 
-            env.render(0.001)
-
-            # Draw actual trajectories.
+            env.render(
+                0.001
+            )
 
             for agent in agents:
 
@@ -483,6 +589,7 @@ def main():
                 )
 
                 if len(trajectory) < 2:
+
                     continue
 
                 plt.plot(
@@ -492,10 +599,12 @@ def main():
                     alpha=0.7,
                 )
 
-            plt.pause(0.001)
+            plt.pause(
+                0.001
+            )
 
         # ------------------------------------------------------------------
-        # Completion
+        # Completion.
         # ------------------------------------------------------------------
 
         if all(
@@ -504,9 +613,18 @@ def main():
         ):
 
             print()
-            print("=" * 72)
-            print("ALL ROBOTS ARRIVED")
-            print("=" * 72)
+
+            print(
+                "=" * 72
+            )
+
+            print(
+                "ALL ROBOTS ARRIVED"
+            )
+
+            print(
+                "=" * 72
+            )
 
             break
 
@@ -515,18 +633,36 @@ def main():
     else:
 
         print()
-        print("=" * 72)
-        print("SIMULATION TIMEOUT")
-        print("=" * 72)
+
+        print(
+            "=" * 72
+        )
+
+        print(
+            "SIMULATION TIMEOUT"
+        )
+
+        print(
+            "=" * 72
+        )
 
     # ======================================================================
     # FINAL REPORT
     # ======================================================================
 
     print()
-    print("=" * 72)
-    print("FINAL COORDINATION REPORT")
-    print("=" * 72)
+
+    print(
+        "=" * 72
+    )
+
+    print(
+        "FINAL COORDINATION REPORT"
+    )
+
+    print(
+        "=" * 72
+    )
 
     for agent in agents:
 
@@ -546,13 +682,23 @@ def main():
     print()
 
     print(
-        f"Active negotiations: "
-        f"{len(active_negotiations)}"
+        f"Conflicts handled: "
+        f"{conflict_count}"
     )
 
     print(
-        f"Reservations stored: "
-        f"{len(negotiation.reservations.reservations)}"
+        f"Stop events: "
+        f"{stop_events}"
+    )
+
+    print(
+        f"Safety violations: "
+        f"{collision_count}"
+    )
+
+    print(
+        f"Active conflicts: "
+        f"{len(active_conflicts)}"
     )
 
     env.end()
