@@ -1,0 +1,124 @@
+world:
+  height: 20
+  width: 30
+  step_time: 0.1
+  sample_time: 0.1
+  offset: [0, 0]
+  control_mode: "auto"
+
+robot:
+  - number: 6
+
+    distribution:
+      name: "manual"
+
+    kinematics:
+      name: "diff"
+
+    shape:
+      - name: "circle"
+        radius: 0.35
+
+    state:
+      - [2, 3, 0]
+      - [2, 7, 0]
+      - [2, 11, 0]
+      - [28, 17, 3.14159]
+      - [28, 13, 3.14159]
+      - [28, 9, 3.14159]
+
+    goal:
+      - [28, 17, 0]
+      - [28, 13, 0]
+      - [28, 9, 0]
+      - [2, 3, 0]
+      - [2, 7, 0]
+      - [2, 11, 0]
+
+    color:
+      - "royalblue"
+      - "green"
+      - "orange"
+      - "red"
+      - "purple"
+      - "cyan"
+
+    vel_min: [-1.5, -2.0]
+    vel_max: [1.5, 2.0]
+
+    arrive_mode: "position"
+    goal_threshold: 0.4
+
+    behavior:
+      name: "dash"
+
+    plot:
+      show_trail: true
+      show_goal: true
+      trail_fill: true
+      trail_alpha: 0.2
+      show_trajectory: false
+
+
+obstacle:
+
+  # Upper horizontal shelf
+  - number: 1
+    distribution:
+      name: "manual"
+    state: [0, 0, 0]
+    shape:
+      - name: "linestring"
+        vertices:
+          - [4, 5]
+          - [11, 5]
+          - [11, 8]
+
+  # Upper-right shelf
+  - number: 1
+    distribution:
+      name: "manual"
+    state: [0, 0, 0]
+    shape:
+      - name: "linestring"
+        vertices:
+          - [15, 5]
+          - [22, 5]
+          - [22, 8]
+
+  # Lower-left shelf
+  - number: 1
+    distribution:
+      name: "manual"
+    state: [0, 0, 0]
+    shape:
+      - name: "linestring"
+        vertices:
+          - [4, 12]
+          - [11, 12]
+          - [11, 15]
+
+  # Lower-right shelf
+  - number: 1
+    distribution:
+      name: "manual"
+    state: [0, 0, 0]
+    shape:
+      - name: "linestring"
+        vertices:
+          - [15, 12]
+          - [22, 12]
+          - [22, 15]
+
+  # Central vertical choke-point structure
+  - number: 1
+    distribution:
+      name: "manual"
+    state: [0, 0, 0]
+    shape:
+      - name: "linestring"
+        vertices:
+          - [13, 7]
+          - [13, 10]
+          - [17, 10]
+          - [17, 7]
