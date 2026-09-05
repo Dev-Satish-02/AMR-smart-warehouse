@@ -2,17 +2,20 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from algorithms.conflict_detector import PredictedConflict
+from algorithms.conflict_detector import (
+    PredictedConflict,
+)
 
 
 # ==========================================================================
-# NEGOTIATION DECISION
+# DECISION
 # ==========================================================================
 
 @dataclass
 class NegotiationDecision:
 
     robot_id: str
+
     opponent_id: str
 
     priority: bool
@@ -31,18 +34,19 @@ class NegotiationDecision:
 # ==========================================================================
 
 class NegotiationManager:
+
     """
-    Simple decentralized-style priority negotiation.
+    Simple peer-to-peer priority negotiation.
 
-    For two robots approaching the same conflict region:
+    Earlier ETA wins.
 
-        earlier ETA -> priority
+    If ETAs are approximately equal, the lower robot ID wins.
 
-    If ETAs are effectively equal:
+    Winner:
+        continue + reroute
 
-        lower robot ID -> priority
-
-    The lower-priority robot simply stops.
+    Loser:
+        stop
     """
 
     def __init__(
@@ -50,7 +54,9 @@ class NegotiationManager:
         eta_margin=0.25,
     ):
 
-        self.eta_margin = eta_margin
+        self.eta_margin = (
+            eta_margin
+        )
 
     # ======================================================================
     # ETA
@@ -92,22 +98,22 @@ class NegotiationManager:
         conflict: PredictedConflict,
     ):
 
-        conflict_position = (
+        position = (
             conflict.conflict_position
         )
 
         eta_a = self.estimate_eta(
             agent_a,
-            conflict_position,
+            position,
         )
 
         eta_b = self.estimate_eta(
             agent_b,
-            conflict_position,
+            position,
         )
 
         # ------------------------------------------------------------------
-        # Priority
+        # Earlier ETA wins.
         # ------------------------------------------------------------------
 
         if (
@@ -117,13 +123,13 @@ class NegotiationManager:
 
             winner = agent_a
             loser = agent_b
+
             winner_eta = eta_a
             loser_eta = eta_b
 
             reason = (
                 f"{agent_a.robot_id} "
-                "reaches the conflict "
-                "region earlier"
+                "reaches conflict first"
             )
 
         elif (
@@ -133,13 +139,13 @@ class NegotiationManager:
 
             winner = agent_b
             loser = agent_a
+
             winner_eta = eta_b
             loser_eta = eta_a
 
             reason = (
                 f"{agent_b.robot_id} "
-                "reaches the conflict "
-                "region earlier"
+                "reaches conflict first"
             )
 
         else:
@@ -153,6 +159,7 @@ class NegotiationManager:
 
                 winner = agent_a
                 loser = agent_b
+
                 winner_eta = eta_a
                 loser_eta = eta_b
 
@@ -160,48 +167,62 @@ class NegotiationManager:
 
                 winner = agent_b
                 loser = agent_a
+
                 winner_eta = eta_b
                 loser_eta = eta_a
 
             reason = (
-                "ETA tie; deterministic "
-                "robot-ID priority"
+                "ETA tie; robot-ID priority"
             )
 
         # ------------------------------------------------------------------
-        # Decisions
+        # Winner.
         # ------------------------------------------------------------------
 
         winner_decision = (
             NegotiationDecision(
                 robot_id=winner.robot_id,
                 opponent_id=loser.robot_id,
+
                 priority=True,
-                action="PROCEED",
+
+                action="REROUTE",
+
                 reason=reason,
+
                 conflict_position=(
-                    conflict_position.copy()
+                    position.copy()
                 ),
+
                 time_to_conflict=(
                     winner_eta
                 ),
             )
         )
 
+        # ------------------------------------------------------------------
+        # Loser.
+        # ------------------------------------------------------------------
+
         loser_decision = (
             NegotiationDecision(
                 robot_id=loser.robot_id,
                 opponent_id=winner.robot_id,
+
                 priority=False,
+
                 action="STOP",
+
                 reason=(
                     f"{loser.robot_id} "
                     f"stops for "
                     f"{winner.robot_id}"
                 ),
+
                 conflict_position=(
-                    conflict_position.copy()
+                    position.copy()
                 ),
+
                 time_to_conflict=(
                     loser_eta
                 ),

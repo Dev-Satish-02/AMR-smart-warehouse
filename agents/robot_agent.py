@@ -10,6 +10,7 @@ import numpy as np
 
 @dataclass
 class RobotState:
+
     robot_id: str
 
     position: np.ndarray
@@ -21,7 +22,9 @@ class RobotState:
     task_id: Optional[str] = None
     goal: Optional[np.ndarray] = None
 
-    planned_path: list = field(default_factory=list)
+    planned_path: list = field(
+        default_factory=list
+    )
 
     intent: Optional[str] = None
     eta: Optional[float] = None
@@ -34,34 +37,21 @@ class RobotState:
 # ==========================================================================
 
 class RobotAgent:
+
     """
     NEXUS AMR agent.
 
-    Current prototype stack:
+    Architecture:
 
-        A* global path
+        P2P world model
               ↓
-        P2P state exchange
+        A* global planning
               ↓
-        predictive conflict detection
+        conflict coordination
               ↓
-        priority negotiation
+        dynamic re-routing
               ↓
-        STOP / GO coordination
-              ↓
-        differential-drive execution
-
-    The coordination layer is intentionally simple for the prototype:
-
-        conflict
-            ↓
-        one robot proceeds
-            ↓
-        other robot stops
-            ↓
-        winner clears intersection
-            ↓
-        stopped robot resumes
+        differential-drive control
     """
 
     def __init__(
@@ -103,6 +93,7 @@ class RobotAgent:
         # ------------------------------------------------------------------
 
         self.planned_path = []
+
         self.waypoint_index = 0
 
         # ------------------------------------------------------------------
@@ -110,7 +101,9 @@ class RobotAgent:
         # ------------------------------------------------------------------
 
         self.max_speed = 0.8
+
         self.max_angular_speed = 1.5
+
         self.heading_gain = 2.5
 
         self.waypoint_tolerance = 0.25
@@ -120,8 +113,8 @@ class RobotAgent:
         # ------------------------------------------------------------------
 
         self.stopped = False
+
         self.stop_reason = None
-        self.stop_until = 0.0
 
         self.intent = "IDLE"
 
@@ -129,7 +122,9 @@ class RobotAgent:
     # STATE
     # ======================================================================
 
-    def _read_simulation_state(self):
+    def _read_simulation_state(
+        self
+    ):
 
         state = np.asarray(
             self.robot.state
@@ -148,7 +143,9 @@ class RobotAgent:
                 state[2]
             )
 
-        # Try to read velocity.
+        # --------------------------------------------------------------
+        # Velocity if exposed by IR-SIM.
+        # --------------------------------------------------------------
 
         for attribute in [
             "velocity",
@@ -169,30 +166,45 @@ class RobotAgent:
                         )
                     ).reshape(-1)
 
-                    if len(velocity) >= 2:
+                    if len(
+                        velocity
+                    ) >= 2:
 
-                        self.state.velocity = np.array(
-                            [
-                                float(velocity[0]),
-                                float(velocity[1]),
-                            ]
+                        self.state.velocity = (
+                            np.array(
+                                [
+                                    float(
+                                        velocity[0]
+                                    ),
+                                    float(
+                                        velocity[1]
+                                    ),
+                                ]
+                            )
                         )
 
                         break
 
                 except Exception:
+
                     pass
 
-        self.state.intent = self.intent
+        # --------------------------------------------------------------
+        # State metadata.
+        # --------------------------------------------------------------
 
-        remaining_distance = (
+        self.state.intent = (
+            self.intent
+        )
+
+        remaining = (
             self.remaining_path_length()
         )
 
         if self.max_speed > 0:
 
             self.state.eta = (
-                remaining_distance
+                remaining
                 / self.max_speed
             )
 
@@ -206,12 +218,6 @@ class RobotAgent:
         self.state.timestamp = (
             simulation_time
         )
-
-        # Stop state is controlled explicitly by the coordination layer.
-        #
-        # We do NOT automatically release a stop based on a timer.
-        # The simulation driver releases it once the winner has cleared
-        # the conflict region.
 
     # ======================================================================
     # P2P
@@ -288,9 +294,84 @@ class RobotAgent:
             goal,
         )
 
-        self.set_path(path)
+        if not path:
+
+            raise RuntimeError(
+                f"{self.robot_id}: "
+                "A* could not find a path."
+            )
+
+        self.set_path(
+            path
+        )
 
         return path
+
+    # ======================================================================
+    # DYNAMIC RE-ROUTING
+    # ======================================================================
+
+    def replan_around(
+        self,
+        obstacle_position,
+        obstacle_radius=1.0,
+    ):
+        """
+        Treat a stopped peer as a temporary obstacle and
+        generate a new A* path around it.
+        """
+
+        if self.planner is None:
+
+            return False
+
+        if self.state.goal is None:
+
+            return False
+
+        obstacle_position = np.asarray(
+            obstacle_position,
+            dtype=float,
+        )
+
+        # --------------------------------------------------------------
+        # Plan from CURRENT position to CURRENT goal.
+        # --------------------------------------------------------------
+
+        path = self.planner.plan(
+            self.state.position,
+            self.state.goal,
+            dynamic_obstacles=[
+                (
+                    obstacle_position,
+                    obstacle_radius,
+                )
+            ],
+        )
+
+        # --------------------------------------------------------------
+        # No alternative path.
+        # --------------------------------------------------------------
+
+        if not path:
+
+            return False
+
+        # --------------------------------------------------------------
+        # Install new path.
+        # --------------------------------------------------------------
+
+        self.set_path(
+            path
+        )
+
+        self.intent = "REROUTING"
+
+        return True
+
+    # ======================================================================
+    # SET PATH
+    # ======================================================================
 
     def set_path(
         self,
@@ -317,14 +398,18 @@ class RobotAgent:
 
     def path_length(self):
 
-        if len(self.planned_path) < 2:
+        if len(
+            self.planned_path
+        ) < 2:
 
             return 0.0
 
         total = 0.0
 
         for i in range(
-            len(self.planned_path) - 1
+            len(
+                self.planned_path
+            ) - 1
         ):
 
             total += np.linalg.norm(
@@ -332,7 +417,9 @@ class RobotAgent:
                 - self.planned_path[i]
             )
 
-        return float(total)
+        return float(
+            total
+        )
 
     def remaining_path_length(self):
 
@@ -342,7 +429,9 @@ class RobotAgent:
 
         if (
             self.waypoint_index
-            >= len(self.planned_path)
+            >= len(
+                self.planned_path
+            )
         ):
 
             return 0.0
@@ -356,7 +445,9 @@ class RobotAgent:
 
         for i in range(
             self.waypoint_index,
-            len(self.planned_path) - 1,
+            len(
+                self.planned_path
+            ) - 1,
         ):
 
             total += np.linalg.norm(
@@ -364,7 +455,9 @@ class RobotAgent:
                 - self.planned_path[i]
             )
 
-        return float(total)
+        return float(
+            total
+        )
 
     # ======================================================================
     # WAYPOINTS
@@ -378,7 +471,9 @@ class RobotAgent:
 
         if (
             self.waypoint_index
-            >= len(self.planned_path)
+            >= len(
+                self.planned_path
+            )
         ):
 
             return self.planned_path[-1]
@@ -389,7 +484,9 @@ class RobotAgent:
 
     def waypoint_reached(self):
 
-        waypoint = self.current_waypoint()
+        waypoint = (
+            self.current_waypoint()
+        )
 
         if waypoint is None:
 
@@ -409,7 +506,9 @@ class RobotAgent:
 
         while (
             self.waypoint_index
-            < len(self.planned_path)
+            < len(
+                self.planned_path
+            )
             and self.waypoint_reached()
         ):
 
@@ -417,7 +516,9 @@ class RobotAgent:
 
         if (
             self.waypoint_index
-            >= len(self.planned_path)
+            >= len(
+                self.planned_path
+            )
         ):
 
             self.intent = "ARRIVED"
@@ -427,19 +528,13 @@ class RobotAgent:
         return False
 
     # ======================================================================
-    # SIMPLE STOP / GO COORDINATION
+    # STOP / RESUME
     # ======================================================================
 
     def stop(
         self,
         reason="CONFLICT",
     ):
-        """
-        Stop this robot.
-
-        This is deliberately simple. The robot does not try to move to
-        another point or perform a secondary maneuver.
-        """
 
         self.stopped = True
 
@@ -453,11 +548,11 @@ class RobotAgent:
 
         self.stop_reason = None
 
-        self.stop_until = 0.0
-
         if (
             self.waypoint_index
-            < len(self.planned_path)
+            < len(
+                self.planned_path
+            )
         ):
 
             self.intent = "MOVING"
@@ -466,8 +561,9 @@ class RobotAgent:
 
             self.intent = "ARRIVED"
 
-    # Backward-compatible aliases so other NEXUS code that still calls
-    # these names does not immediately break.
+    # ======================================================================
+    # BACKWARDS COMPATIBILITY
+    # ======================================================================
 
     def set_yield(
         self,
@@ -476,16 +572,18 @@ class RobotAgent:
         yield_position=None,
     ):
 
-        self.stop(
-            reason=(
-                f"YIELD_TO_{yielding_to}"
-                if yielding_to is not None
-                else "CONFLICT"
-            )
-        )
+        if yielding_to is None:
 
-        self.stop_until = float(
-            yield_until
+            reason = "CONFLICT"
+
+        else:
+
+            reason = (
+                f"WAIT_FOR_{yielding_to}"
+            )
+
+        self.stop(
+            reason=reason
         )
 
     def clear_yield(self):
@@ -497,7 +595,9 @@ class RobotAgent:
     # ======================================================================
 
     @staticmethod
-    def wrap_angle(angle):
+    def wrap_angle(
+        angle
+    ):
 
         return (
             angle + np.pi
@@ -505,95 +605,10 @@ class RobotAgent:
             2.0 * np.pi
         ) - np.pi
 
-    def _drive_to_point(
-        self,
-        target,
-    ):
-
-        target = np.asarray(
-            target,
-            dtype=float,
-        )
-
-        delta = (
-            target
-            - self.state.position
-        )
-
-        distance = np.linalg.norm(
-            delta
-        )
-
-        if distance < 1e-8:
-
-            return np.array(
-                [
-                    0.0,
-                    0.0,
-                ],
-                dtype=float,
-            )
-
-        desired_heading = np.arctan2(
-            delta[1],
-            delta[0],
-        )
-
-        heading_error = self.wrap_angle(
-            desired_heading
-            - self.state.heading
-        )
-
-        angular_velocity = (
-            self.heading_gain
-            * heading_error
-        )
-
-        angular_velocity = np.clip(
-            angular_velocity,
-            -self.max_angular_speed,
-            self.max_angular_speed,
-        )
-
-        heading_factor = max(
-            0.0,
-            np.cos(heading_error),
-        )
-
-        linear_velocity = (
-            self.max_speed
-            * heading_factor
-        )
-
-        # Slow down near waypoint.
-
-        if distance < 1.0:
-
-            linear_velocity *= min(
-                1.0,
-                distance / 0.5,
-            )
-
-        # Rotate before driving if facing away.
-
-        if abs(heading_error) > np.deg2rad(
-            70.0
-        ):
-
-            linear_velocity = 0.0
-
-        return np.array(
-            [
-                linear_velocity,
-                angular_velocity,
-            ],
-            dtype=float,
-        )
-
     def desired_velocity(self):
 
         # ------------------------------------------------------------------
-        # STOP
+        # STOPPED
         # ------------------------------------------------------------------
 
         if self.stopped:
@@ -625,14 +640,16 @@ class RobotAgent:
             )
 
         # ------------------------------------------------------------------
-        # ADVANCE WAYPOINT
+        # Advance waypoint.
         # ------------------------------------------------------------------
 
         self.advance_waypoint()
 
         if (
             self.waypoint_index
-            >= len(self.planned_path)
+            >= len(
+                self.planned_path
+            )
         ):
 
             self.intent = "ARRIVED"
@@ -645,19 +662,108 @@ class RobotAgent:
                 dtype=float,
             )
 
-        # ------------------------------------------------------------------
-        # NORMAL PATH FOLLOWING
-        # ------------------------------------------------------------------
-
-        target = self.current_waypoint()
-
-        command = self._drive_to_point(
-            target
+        target = (
+            self.current_waypoint()
         )
 
-        self.intent = "MOVING"
+        delta = (
+            target
+            - self.state.position
+        )
 
-        return command
+        distance = np.linalg.norm(
+            delta
+        )
+
+        if distance < 1e-8:
+
+            return np.array(
+                [
+                    0.0,
+                    0.0,
+                ],
+                dtype=float,
+            )
+
+        # ------------------------------------------------------------------
+        # Desired heading.
+        # ------------------------------------------------------------------
+
+        desired_heading = np.arctan2(
+            delta[1],
+            delta[0],
+        )
+
+        heading_error = (
+            self.wrap_angle(
+                desired_heading
+                - self.state.heading
+            )
+        )
+
+        # ------------------------------------------------------------------
+        # Angular velocity.
+        # ------------------------------------------------------------------
+
+        angular_velocity = (
+            self.heading_gain
+            * heading_error
+        )
+
+        angular_velocity = np.clip(
+            angular_velocity,
+            -self.max_angular_speed,
+            self.max_angular_speed,
+        )
+
+        # ------------------------------------------------------------------
+        # Linear velocity.
+        # ------------------------------------------------------------------
+
+        heading_factor = max(
+            0.0,
+            np.cos(
+                heading_error
+            ),
+        )
+
+        linear_velocity = (
+            self.max_speed
+            * heading_factor
+        )
+
+        # Slow down near waypoint.
+
+        if distance < 1.0:
+
+            linear_velocity *= min(
+                1.0,
+                distance / 0.5,
+            )
+
+        # Rotate before moving if facing strongly away.
+
+        if abs(
+            heading_error
+        ) > np.deg2rad(70.0):
+
+            linear_velocity = 0.0
+
+        # ------------------------------------------------------------------
+        # Preserve REROUTING state for one cycle, then MOVING.
+        # ------------------------------------------------------------------
+
+        if self.intent != "REROUTING":
+
+            self.intent = "MOVING"
+
+        return np.array(
+            [
+                linear_velocity,
+                angular_velocity,
+            ],
+            dtype=float,
+        )
 
     # ======================================================================
     # STATUS
@@ -665,7 +771,9 @@ class RobotAgent:
 
     def summary(self):
 
-        position = self.state.position
+        position = (
+            self.state.position
+        )
 
         return (
             f"{self.robot_id}: "

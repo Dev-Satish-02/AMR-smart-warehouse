@@ -5,7 +5,7 @@ import numpy as np
 
 
 # ==========================================================================
-# PREDICTED CONFLICT
+# CONFLICT
 # ==========================================================================
 
 @dataclass
@@ -31,21 +31,12 @@ class PredictedConflict:
 # ==========================================================================
 
 class ConflictDetector:
-    """
-    Lightweight predictive conflict detector.
-
-    Each robot's remaining A* path is projected forward at approximately
-    max_speed.
-
-    A conflict is raised when the predicted distance between two moving
-    robots falls below safety_distance.
-    """
 
     def __init__(
         self,
         prediction_horizon=3.0,
         prediction_dt=0.2,
-        safety_distance=0.95,
+        safety_distance=1.40,
     ):
 
         self.prediction_horizon = (
@@ -61,7 +52,7 @@ class ConflictDetector:
         )
 
     # ======================================================================
-    # TRAJECTORY PREDICTION
+    # PREDICTION
     # ======================================================================
 
     def predict_trajectory(
@@ -73,8 +64,8 @@ class ConflictDetector:
             agent.state.position.copy()
         )
 
-        # A robot that is already stopped should not generate a new
-        # moving-vs-moving conflict.
+        # A stopped robot does not participate in a moving-vs-moving
+        # prediction.
 
         if getattr(
             agent,
@@ -82,19 +73,11 @@ class ConflictDetector:
             False,
         ):
 
-            times = np.arange(
-                0.0,
-                self.prediction_horizon
-                + self.prediction_dt,
-                self.prediction_dt,
-            )
-
             return [
                 (
-                    float(t),
+                    0.0,
                     position.copy(),
                 )
-                for t in times
             ]
 
         if agent.intent in {
@@ -103,25 +86,19 @@ class ConflictDetector:
             "ARRIVED",
         }:
 
-            times = np.arange(
-                0.0,
-                self.prediction_horizon
-                + self.prediction_dt,
-                self.prediction_dt,
-            )
-
             return [
                 (
-                    float(t),
+                    0.0,
                     position.copy(),
                 )
-                for t in times
             ]
 
         if (
             not agent.planned_path
             or agent.waypoint_index
-            >= len(agent.planned_path)
+            >= len(
+                agent.planned_path
+            )
         ):
 
             return [
@@ -143,14 +120,14 @@ class ConflictDetector:
             ]
 
         # ------------------------------------------------------------------
-        # Remaining path
+        # Remaining path.
         # ------------------------------------------------------------------
 
-        path = [
+        points = [
             position.copy()
         ]
 
-        path.extend(
+        points.extend(
             [
                 np.asarray(
                     point,
@@ -164,22 +141,20 @@ class ConflictDetector:
 
         # Remove duplicate points.
 
-        cleaned_path = [
-            path[0]
+        path = [
+            points[0]
         ]
 
-        for point in path[1:]:
+        for point in points[1:]:
 
             if np.linalg.norm(
                 point
-                - cleaned_path[-1]
+                - path[-1]
             ) > 1e-8:
 
-                cleaned_path.append(
+                path.append(
                     point
                 )
-
-        path = cleaned_path
 
         if len(path) < 2:
 
@@ -191,16 +166,16 @@ class ConflictDetector:
             ]
 
         # ------------------------------------------------------------------
-        # Segment lengths
+        # Segment lengths.
         # ------------------------------------------------------------------
 
-        segment_lengths = []
+        lengths = []
 
         for i in range(
             len(path) - 1
         ):
 
-            segment_lengths.append(
+            lengths.append(
                 np.linalg.norm(
                     path[i + 1]
                     - path[i]
@@ -209,17 +184,19 @@ class ConflictDetector:
 
         cumulative = [0.0]
 
-        for length in segment_lengths:
+        for length in lengths:
 
             cumulative.append(
                 cumulative[-1]
                 + length
             )
 
-        total_length = cumulative[-1]
+        total_length = (
+            cumulative[-1]
+        )
 
         # ------------------------------------------------------------------
-        # Predict
+        # Sample prediction.
         # ------------------------------------------------------------------
 
         predictions = []
@@ -233,48 +210,36 @@ class ConflictDetector:
 
         for future_time in times:
 
-            distance = (
+            travelled = (
                 speed
                 * future_time
             )
 
-            if distance >= total_length:
+            if travelled >= total_length:
 
                 predictions.append(
                     (
-                        float(future_time),
+                        float(
+                            future_time
+                        ),
                         path[-1].copy(),
                     )
                 )
 
                 continue
 
-            for segment_index in range(
-                len(segment_lengths)
+            for i in range(
+                len(lengths)
             ):
 
-                start_distance = (
-                    cumulative[
-                        segment_index
-                    ]
-                )
-
-                end_distance = (
-                    cumulative[
-                        segment_index + 1
-                    ]
-                )
-
                 if (
-                    start_distance
-                    <= distance
-                    <= end_distance
+                    cumulative[i]
+                    <= travelled
+                    <= cumulative[i + 1]
                 ):
 
                     segment_length = (
-                        segment_lengths[
-                            segment_index
-                        ]
+                        lengths[i]
                     )
 
                     if segment_length < 1e-8:
@@ -284,27 +249,24 @@ class ConflictDetector:
                     else:
 
                         ratio = (
-                            distance
-                            - start_distance
+                            travelled
+                            - cumulative[i]
                         ) / segment_length
 
-                    start = path[
-                        segment_index
-                    ]
-
-                    end = path[
-                        segment_index + 1
-                    ]
-
                     predicted = (
-                        start
+                        path[i]
                         + ratio
-                        * (end - start)
+                        * (
+                            path[i + 1]
+                            - path[i]
+                        )
                     )
 
                     predictions.append(
                         (
-                            float(future_time),
+                            float(
+                                future_time
+                            ),
                             predicted,
                         )
                     )
@@ -314,17 +276,18 @@ class ConflictDetector:
         return predictions
 
     # ======================================================================
-    # PAIRWISE CONFLICT
+    # PAIR
     # ======================================================================
 
     def detect_pair(
         self,
         agent_a,
         agent_b,
-    ) -> Optional[PredictedConflict]:
+    ) -> Optional[
+        PredictedConflict
+    ]:
 
-        # If either robot is already stopped, do not create another
-        # moving-vs-moving negotiation.
+        # Do not negotiate with a robot that is already stopped.
 
         if getattr(
             agent_a,
@@ -387,17 +350,26 @@ class ConflictDetector:
                 return PredictedConflict(
                     robot_a=agent_a.robot_id,
                     robot_b=agent_b.robot_id,
+
                     time_to_conflict=float(
                         min(
                             time_a,
                             time_b,
                         )
                     ),
-                    position_a=position_a.copy(),
-                    position_b=position_b.copy(),
+
+                    position_a=(
+                        position_a.copy()
+                    ),
+
+                    position_b=(
+                        position_b.copy()
+                    ),
+
                     conflict_position=(
                         conflict_position.copy()
                     ),
+
                     minimum_distance=float(
                         distance
                     ),
@@ -406,7 +378,7 @@ class ConflictDetector:
         return None
 
     # ======================================================================
-    # ALL CONFLICTS
+    # ALL
     # ======================================================================
 
     def detect_all(

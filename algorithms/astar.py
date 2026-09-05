@@ -1,239 +1,426 @@
-from __future__ import annotations
-
 import heapq
 import math
 from dataclasses import dataclass
-from typing import Iterable
+
+import numpy as np
 
 
-@dataclass(frozen=True)
+# ==========================================================================
+# GRID CONFIGURATION
+# ==========================================================================
+
+@dataclass
 class GridConfig:
+
     width: float = 30.0
     height: float = 20.0
+
     resolution: float = 0.5
 
-    # Robot radius + additional safety margin.
     robot_radius: float = 0.35
     safety_margin: float = 0.15
 
-    @property
-    def inflation_radius(self) -> float:
-        return self.robot_radius + self.safety_margin
 
+# ==========================================================================
+# WAREHOUSE GRID
+# ==========================================================================
 
 class WarehouseGrid:
-    """
-    Discretized representation of the NEXUS warehouse.
 
-    Coordinates are expressed in metres.
-    """
+    def __init__(
+        self,
+        config=None,
+    ):
 
-    def __init__(self, config: GridConfig | None = None):
-        self.config = config or GridConfig()
+        if config is None:
+            config = GridConfig()
 
-        self.width_cells = int(
-            self.config.width / self.config.resolution
+        self.config = config
+
+        self.width = config.width
+        self.height = config.height
+        self.resolution = config.resolution
+
+        self.robot_radius = (
+            config.robot_radius
         )
 
-        self.height_cells = int(
-            self.config.height / self.config.resolution
+        self.safety_margin = (
+            config.safety_margin
         )
 
-        # Obstacles represented as line segments:
+        # ------------------------------------------------------------------
+        # Static warehouse obstacles.
         #
-        # (x1, y1) -> (x2, y2)
+        # Each obstacle is represented as:
         #
-        # These correspond to the shelf/choke-point geometry
-        # used in the IR-SIM warehouse.
+        #     ((x1, y1), (x2, y2))
+        #
+        # These correspond to the shelves/choke points in warehouse.yaml.
+        # ------------------------------------------------------------------
+
         self.obstacles = [
-            # Upper-left shelf
-            ((4, 5), (11, 5)),
-            ((11, 5), (11, 8)),
 
-            # Upper-right shelf
-            ((15, 5), (22, 5)),
-            ((22, 5), (22, 8)),
+            (
+                (4.0, 5.0),
+                (11.0, 5.0),
+            ),
 
-            # Lower-left shelf
-            ((4, 12), (11, 12)),
-            ((11, 12), (11, 15)),
+            (
+                (11.0, 5.0),
+                (11.0, 8.0),
+            ),
 
-            # Lower-right shelf
-            ((15, 12), (22, 12)),
-            ((22, 12), (22, 15)),
+            (
+                (15.0, 5.0),
+                (22.0, 5.0),
+            ),
 
-            # Central choke-point structure
-            ((13, 7), (13, 10)),
-            ((13, 10), (17, 10)),
-            ((17, 10), (17, 7)),
+            (
+                (22.0, 5.0),
+                (22.0, 8.0),
+            ),
+
+            (
+                (4.0, 12.0),
+                (11.0, 12.0),
+            ),
+
+            (
+                (11.0, 12.0),
+                (11.0, 15.0),
+            ),
+
+            (
+                (15.0, 12.0),
+                (22.0, 12.0),
+            ),
+
+            (
+                (22.0, 12.0),
+                (22.0, 15.0),
+            ),
+
+            (
+                (13.0, 7.0),
+                (13.0, 10.0),
+            ),
+
+            (
+                (13.0, 10.0),
+                (17.0, 10.0),
+            ),
+
+            (
+                (17.0, 10.0),
+                (17.0, 7.0),
+            ),
         ]
 
-    # ---------------------------------------------------------
-    # Coordinate conversion
-    # ---------------------------------------------------------
+        self.grid_width = int(
+            round(
+                self.width
+                / self.resolution
+            )
+        )
 
-    def world_to_grid(self, x: float, y: float) -> tuple[int, int]:
-        gx = round(x / self.config.resolution)
-        gy = round(y / self.config.resolution)
+        self.grid_height = int(
+            round(
+                self.height
+                / self.resolution
+            )
+        )
 
-        return gx, gy
+    # ======================================================================
+    # COORDINATE CONVERSION
+    # ======================================================================
 
-    def grid_to_world(self, gx: int, gy: int) -> tuple[float, float]:
-        x = gx * self.config.resolution
-        y = gy * self.config.resolution
+    def world_to_grid(
+        self,
+        position,
+    ):
 
-        return x, y
+        position = np.asarray(
+            position,
+            dtype=float,
+        )
 
-    # ---------------------------------------------------------
-    # Geometry
-    # ---------------------------------------------------------
+        x = int(
+            round(
+                position[0]
+                / self.resolution
+            )
+        )
+
+        y = int(
+            round(
+                position[1]
+                / self.resolution
+            )
+        )
+
+        x = np.clip(
+            x,
+            0,
+            self.grid_width - 1,
+        )
+
+        y = np.clip(
+            y,
+            0,
+            self.grid_height - 1,
+        )
+
+        return (
+            int(x),
+            int(y),
+        )
+
+    def grid_to_world(
+        self,
+        cell,
+    ):
+
+        return np.array(
+            [
+                cell[0]
+                * self.resolution,
+
+                cell[1]
+                * self.resolution,
+            ],
+            dtype=float,
+        )
+
+    # ======================================================================
+    # GEOMETRY
+    # ======================================================================
 
     @staticmethod
     def point_to_segment_distance(
-        px: float,
-        py: float,
-        ax: float,
-        ay: float,
-        bx: float,
-        by: float,
-    ) -> float:
+        point,
+        segment_start,
+        segment_end,
+    ):
 
-        abx = bx - ax
-        aby = by - ay
-
-        apx = px - ax
-        apy = py - ay
-
-        ab_squared = abx * abx + aby * aby
-
-        if ab_squared == 0:
-            return math.hypot(
-                px - ax,
-                py - ay,
-            )
-
-        t = (
-            apx * abx +
-            apy * aby
-        ) / ab_squared
-
-        t = max(0.0, min(1.0, t))
-
-        closest_x = ax + t * abx
-        closest_y = ay + t * aby
-
-        return math.hypot(
-            px - closest_x,
-            py - closest_y,
+        point = np.asarray(
+            point,
+            dtype=float,
         )
 
-    def is_obstacle(self, x: float, y: float) -> bool:
-        """
-        Returns True if the world coordinate is too close
-        to a warehouse obstacle.
-        """
+        segment_start = np.asarray(
+            segment_start,
+            dtype=float,
+        )
 
-        margin = self.config.inflation_radius
+        segment_end = np.asarray(
+            segment_end,
+            dtype=float,
+        )
 
-        for (a, b) in self.obstacles:
+        segment = (
+            segment_end
+            - segment_start
+        )
 
-            distance = self.point_to_segment_distance(
-                x,
-                y,
-                a[0],
-                a[1],
-                b[0],
-                b[1],
+        length_squared = np.dot(
+            segment,
+            segment,
+        )
+
+        if length_squared < 1e-12:
+
+            return float(
+                np.linalg.norm(
+                    point
+                    - segment_start
+                )
             )
 
-            if distance <= margin:
-                return True
+        t = np.dot(
+            point
+            - segment_start,
+            segment,
+        ) / length_squared
 
-        return False
+        t = np.clip(
+            t,
+            0.0,
+            1.0,
+        )
 
-    def is_valid(self, node: tuple[int, int]) -> bool:
+        projection = (
+            segment_start
+            + t * segment
+        )
 
-        gx, gy = node
+        return float(
+            np.linalg.norm(
+                point
+                - projection
+            )
+        )
 
-        if gx < 0 or gx > self.width_cells:
-            return False
+    # ======================================================================
+    # VALIDITY
+    # ======================================================================
 
-        if gy < 0 or gy > self.height_cells:
-            return False
-
-        x, y = self.grid_to_world(gx, gy)
-
-        return not self.is_obstacle(x, y)
-
-    # ---------------------------------------------------------
-    # Neighbours
-    # ---------------------------------------------------------
-
-    def neighbours(
+    def is_valid(
         self,
-        node: tuple[int, int],
-    ) -> Iterable[tuple[tuple[int, int], float]]:
+        cell,
+        dynamic_obstacles=None,
+        allow_start=False,
+    ):
 
-        gx, gy = node
+        x, y = cell
 
-        moves = [
-            (-1, 0, 1.0),
-            (1, 0, 1.0),
-            (0, -1, 1.0),
-            (0, 1, 1.0),
+        # ------------------------------------------------------------------
+        # World bounds.
+        # ------------------------------------------------------------------
+
+        if (
+            x < 0
+            or x >= self.grid_width
+            or y < 0
+            or y >= self.grid_height
+        ):
+
+            return False
+
+        point = self.grid_to_world(
+            cell
+        )
+
+        # ------------------------------------------------------------------
+        # Static obstacles.
+        # ------------------------------------------------------------------
+
+        static_clearance = (
+            self.robot_radius
+            + self.safety_margin
+        )
+
+        for start, end in self.obstacles:
+
+            distance = (
+                self.point_to_segment_distance(
+                    point,
+                    start,
+                    end,
+                )
+            )
+
+            if distance < static_clearance:
+
+                return False
+
+        # ------------------------------------------------------------------
+        # Dynamic obstacles.
+        #
+        # dynamic_obstacles:
+        #
+        # [
+        #     (position, radius),
+        #     ...
+        # ]
+        # ------------------------------------------------------------------
+
+        if dynamic_obstacles:
+
+            for (
+                obstacle_position,
+                obstacle_radius,
+            ) in dynamic_obstacles:
+
+                obstacle_position = np.asarray(
+                    obstacle_position,
+                    dtype=float,
+                )
+
+                distance = np.linalg.norm(
+                    point
+                    - obstacle_position
+                )
+
+                if (
+                    distance
+                    < obstacle_radius
+                ):
+
+                    # The current robot position is allowed even if it
+                    # lies just inside the temporary obstacle. This is
+                    # important because replanning can start close to
+                    # the stopped robot.
+                    if allow_start:
+
+                        continue
+
+                    return False
+
+        return True
+
+    # ======================================================================
+    # NEIGHBOURS
+    # ======================================================================
+
+    @staticmethod
+    def neighbours(
+        cell,
+    ):
+
+        x, y = cell
+
+        return [
+            (x + 1, y),
+            (x - 1, y),
+            (x, y + 1),
+            (x, y - 1),
         ]
 
-        for dx, dy, cost in moves:
-
-            neighbour = (
-                gx + dx,
-                gy + dy,
-            )
-
-            if self.is_valid(neighbour):
-                yield neighbour, cost
-
-    # ---------------------------------------------------------
-    # Heuristic
-    # ---------------------------------------------------------
+    # ======================================================================
+    # HEURISTIC
+    # ======================================================================
 
     @staticmethod
     def heuristic(
-        a: tuple[int, int],
-        b: tuple[int, int],
-    ) -> float:
+        current,
+        goal,
+    ):
 
-        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+        return (
+            abs(
+                current[0]
+                - goal[0]
+            )
+            +
+            abs(
+                current[1]
+                - goal[1]
+            )
+        )
 
-    # ---------------------------------------------------------
+    # ======================================================================
     # A*
-    # ---------------------------------------------------------
+    # ======================================================================
 
     def plan(
         self,
-        start: tuple[float, float],
-        goal: tuple[float, float],
-    ) -> list[tuple[float, float]]:
+        start,
+        goal,
+        dynamic_obstacles=None,
+    ):
 
-        start_node = self.world_to_grid(
-            start[0],
-            start[1],
+        start_cell = self.world_to_grid(
+            start
         )
 
-        goal_node = self.world_to_grid(
-            goal[0],
-            goal[1],
+        goal_cell = self.world_to_grid(
+            goal
         )
 
-        if not self.is_valid(start_node):
-            raise ValueError(
-                f"Start position is blocked: {start}"
-            )
-
-        if not self.is_valid(goal_node):
-            raise ValueError(
-                f"Goal position is blocked: {goal}"
-            )
+        # ------------------------------------------------------------------
+        # A*.
+        # ------------------------------------------------------------------
 
         open_set = []
 
@@ -241,89 +428,123 @@ class WarehouseGrid:
             open_set,
             (
                 0.0,
-                start_node,
+                start_cell,
             ),
         )
 
         came_from = {}
 
-        g_score = {
-            start_node: 0.0
+        cost_so_far = {
+            start_cell: 0.0
         }
 
         while open_set:
 
-            _, current = heapq.heappop(
-                open_set
+            _, current = (
+                heapq.heappop(
+                    open_set
+                )
             )
 
-            if current == goal_node:
+            # --------------------------------------------------------------
+            # Goal.
+            # --------------------------------------------------------------
 
-                return self._reconstruct_path(
-                    came_from,
-                    current,
-                )
+            if current == goal_cell:
 
-            for neighbour, move_cost in self.neighbours(
+                path = [
+                    current
+                ]
+
+                while current in came_from:
+
+                    current = (
+                        came_from[
+                            current
+                        ]
+                    )
+
+                    path.append(
+                        current
+                    )
+
+                path.reverse()
+
+                return [
+                    self.grid_to_world(
+                        cell
+                    )
+                    for cell in path
+                ]
+
+            # --------------------------------------------------------------
+            # Explore neighbours.
+            # --------------------------------------------------------------
+
+            for neighbour in self.neighbours(
                 current
             ):
 
-                tentative_g = (
-                    g_score[current] +
-                    move_cost
+                valid = self.is_valid(
+                    neighbour,
+                    dynamic_obstacles=(
+                        dynamic_obstacles
+                    ),
+                    allow_start=(
+                        neighbour
+                        == start_cell
+                    ),
+                )
+
+                if not valid:
+
+                    continue
+
+                new_cost = (
+                    cost_so_far[current]
+                    + 1.0
                 )
 
                 if (
-                    neighbour not in g_score
-                    or tentative_g < g_score[neighbour]
+                    neighbour
+                    not in cost_so_far
+                    or new_cost
+                    < cost_so_far[
+                        neighbour
+                    ]
                 ):
 
-                    came_from[neighbour] = current
-                    g_score[neighbour] = tentative_g
+                    cost_so_far[
+                        neighbour
+                    ] = new_cost
 
-                    f_score = (
-                        tentative_g +
-                        self.heuristic(
+                    priority = (
+                        new_cost
+                        + self.heuristic(
                             neighbour,
-                            goal_node,
+                            goal_cell,
                         )
                     )
 
                     heapq.heappush(
                         open_set,
                         (
-                            f_score,
+                            priority,
                             neighbour,
                         ),
                     )
 
-        raise RuntimeError(
-            f"A* could not find a path "
-            f"from {start} to {goal}"
-        )
+                    came_from[
+                        neighbour
+                    ] = current
 
-    # ---------------------------------------------------------
-    # Path reconstruction
-    # ---------------------------------------------------------
+        # ------------------------------------------------------------------
+        # No path.
+        # ------------------------------------------------------------------
 
-    def _reconstruct_path(
-        self,
-        came_from: dict,
-        current: tuple[int, int],
-    ) -> list[tuple[float, float]]:
+        return []
 
-        path = [current]
 
-        while current in came_from:
-            current = came_from[current]
-            path.append(current)
-
-        path.reverse()
-
-        return [
-            self.grid_to_world(
-                gx,
-                gy,
-            )
-            for gx, gy in path
-        ]
+# ==========================================================================
+# END
+# ==========================================================================

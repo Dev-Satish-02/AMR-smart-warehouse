@@ -2,18 +2,33 @@ import numpy as np
 import matplotlib.pyplot as plt
 import irsim
 
-from algorithms.planner import NEXUSPlanner
-from algorithms.conflict_detector import ConflictDetector
-from algorithms.negotiation import NegotiationManager
-from agents.robot_agent import RobotAgent
-from communication.p2p import P2PNetwork
+from algorithms.planner import (
+    NEXUSPlanner,
+)
+
+from algorithms.conflict_detector import (
+    ConflictDetector,
+)
+
+from algorithms.negotiation import (
+    NegotiationManager,
+)
+
+from agents.robot_agent import (
+    RobotAgent,
+)
+
+from communication.p2p import (
+    P2PNetwork,
+)
 
 
 # ==========================================================================
-# ROBOT CONFIGURATION
+# ROBOTS
 # ==========================================================================
 
 ROBOT_CONFIG = [
+
     (
         "R1",
         np.array([2.0, 3.0]),
@@ -53,22 +68,21 @@ ROBOT_CONFIG = [
 
 
 # ==========================================================================
-# COORDINATION PARAMETERS
+# PARAMETERS
 # ==========================================================================
 
-# Once the priority robot is this far beyond the conflict point,
-# release the stopped robot.
+# How far the winner must travel beyond the original conflict point
+# before the stopped robot is released.
 
 CLEARANCE_DISTANCE = 1.5
 
-# Hard physical safety stop.
-#
-# This is independent of prediction/negotiation.
-# If two robots actually get this close, both stop.
-#
-# We intentionally keep this separate from the normal STOP/GO logic.
+# Temporary obstacle around a stopped robot used by A*.
 
-HARD_SAFETY_DISTANCE = 0.72
+DYNAMIC_OBSTACLE_RADIUS = 1.0
+
+# Emergency physical safety distance.
+
+HARD_SAFETY_DISTANCE = 0.70
 
 
 # ==========================================================================
@@ -80,7 +94,7 @@ def main():
     print("=" * 72)
 
     print(
-        "                 NEXUS SIMPLE COORDINATION"
+        "                 NEXUS COORDINATION"
     )
 
     print("=" * 72)
@@ -94,7 +108,7 @@ def main():
     )
 
     # ======================================================================
-    # NEXUS MODULES
+    # MODULES
     # ======================================================================
 
     planner = NEXUSPlanner()
@@ -102,7 +116,7 @@ def main():
     detector = ConflictDetector(
         prediction_horizon=3.0,
         prediction_dt=0.2,
-        safety_distance=0.95,
+        safety_distance=1.40,
     )
 
     negotiation = NegotiationManager(
@@ -112,7 +126,7 @@ def main():
     network = P2PNetwork()
 
     # ======================================================================
-    # ROBOT AGENTS
+    # CREATE ROBOTS
     # ======================================================================
 
     agents = []
@@ -141,9 +155,13 @@ def main():
             goal=goal,
         )
 
-        agents.append(agent)
+        agents.append(
+            agent
+        )
 
-        network.register(agent)
+        network.register(
+            agent
+        )
 
         print(
             f"{robot_id}: "
@@ -158,29 +176,19 @@ def main():
     )
 
     print(
-        "Planning: A*"
+        "Global planning: A*"
     )
 
     print(
-        "Conflict prediction: 3.0 s horizon"
+        "Conflict prediction: 3.0 s"
     )
 
     print(
-        "Coordination: STOP / GO"
+        "Conflict threshold: 1.40 m"
     )
 
     print(
-        "Priority: ETA + robot-ID tie-break"
-    )
-
-    print(
-        f"Clearance distance: "
-        f"{CLEARANCE_DISTANCE:.2f} m"
-    )
-
-    print(
-        f"Hard safety distance: "
-        f"{HARD_SAFETY_DISTANCE:.2f} m"
+        "Coordination: STOP + dynamic A* reroute"
     )
 
     print()
@@ -195,16 +203,12 @@ def main():
     }
 
     # ======================================================================
-    # ACTIVE CONFLICTS
+    # ACTIVE COORDINATION
     #
-    # pair -> information about who has priority and where the conflict is.
-    #
-    # Example:
-    #
-    # ("R1", "R4") -> {
-    #     "winner": R1,
-    #     "loser": R4,
-    #     "position": [10, 17]
+    # pair -> {
+    #     winner,
+    #     loser,
+    #     conflict_position
     # }
     # ======================================================================
 
@@ -214,11 +218,13 @@ def main():
     # METRICS
     # ======================================================================
 
-    collision_count = 0
-
     conflict_count = 0
 
-    stop_events = 0
+    reroute_count = 0
+
+    stop_count = 0
+
+    safety_violations = 0
 
     # ======================================================================
     # SIMULATION
@@ -226,14 +232,14 @@ def main():
 
     simulation_time = 0.0
 
-    max_steps = 600
+    max_steps = 900
 
     for step in range(
         max_steps
     ):
 
         # ------------------------------------------------------------------
-        # Update state.
+        # UPDATE
         # ------------------------------------------------------------------
 
         for agent in agents:
@@ -249,15 +255,13 @@ def main():
             )
 
         # ------------------------------------------------------------------
-        # P2P broadcast.
+        # P2P
         # ------------------------------------------------------------------
 
         network.broadcast_all()
 
         # ------------------------------------------------------------------
-        # Release completed conflicts.
-        #
-        # The winner must physically move beyond the conflict region.
+        # RELEASE STOPPED ROBOTS
         # ------------------------------------------------------------------
 
         for pair in list(
@@ -268,43 +272,51 @@ def main():
                 active_conflicts[pair]
             )
 
-            winner = info["winner"]
-            loser = info["loser"]
+            winner = info[
+                "winner"
+            ]
 
-            conflict_position = (
-                info["position"]
-            )
+            loser = info[
+                "loser"
+            ]
 
-            winner_distance = np.linalg.norm(
-                winner.state.position
-                - conflict_position
+            conflict_position = info[
+                "position"
+            ]
+
+            distance_from_conflict = (
+                np.linalg.norm(
+                    winner.state.position
+                    - conflict_position
+                )
             )
 
             # --------------------------------------------------------------
-            # Winner has cleared the region.
+            # Only release the loser after the winner has physically
+            # cleared the conflict area.
             # --------------------------------------------------------------
 
             if (
-                winner_distance
+                distance_from_conflict
                 >= CLEARANCE_DISTANCE
+                and not winner.stopped
             ):
 
                 loser.resume()
+
+                print(
+                    f"[T={simulation_time:5.1f}s] "
+                    f"{winner.robot_id} cleared "
+                    f"conflict -> "
+                    f"{loser.robot_id} RESUMES"
+                )
 
                 del active_conflicts[
                     pair
                 ]
 
-                print(
-                    f"[T={simulation_time:5.1f}s] "
-                    f"CONFLICT CLEARED: "
-                    f"{winner.robot_id} passed "
-                    f"{pair} -> "
-                    f"{loser.robot_id} RESUMES"
-                )
-
         # ------------------------------------------------------------------
-        # Detect new predicted conflicts.
+        # PREDICT CONFLICTS
         # ------------------------------------------------------------------
 
         conflicts = detector.detect_all(
@@ -312,7 +324,7 @@ def main():
         )
 
         # ------------------------------------------------------------------
-        # Process conflicts.
+        # PROCESS CONFLICTS
         # ------------------------------------------------------------------
 
         for conflict in conflicts:
@@ -327,7 +339,7 @@ def main():
             )
 
             # --------------------------------------------------------------
-            # Already coordinated.
+            # Already being handled.
             # --------------------------------------------------------------
 
             if pair in active_conflicts:
@@ -353,16 +365,8 @@ def main():
             )
 
             # --------------------------------------------------------------
-            # Ignore if either robot is already stopped for another
-            # conflict.
-            #
-            # This prevents contradictory commands such as:
-            #
-            # R3 stops for R2
-            # R3 immediately becomes winner against R6
-            # R3 starts moving
-            #
-            # A robot already waiting simply remains waiting.
+            # If either robot is already waiting for another robot,
+            # don't create another negotiation involving it.
             # --------------------------------------------------------------
 
             if (
@@ -400,14 +404,54 @@ def main():
             )
 
             # --------------------------------------------------------------
-            # STOP LOSER
+            # STOP LOSER FIRST.
             # --------------------------------------------------------------
 
             loser_agent.stop(
                 reason=(
-                    f"WAIT_FOR_{winner_agent.robot_id}"
+                    f"WAIT_FOR_"
+                    f"{winner_agent.robot_id}"
                 )
             )
+
+            # --------------------------------------------------------------
+            # NOW REPLAN WINNER AROUND LOSER.
+            #
+            # This is the important new behavior.
+            # --------------------------------------------------------------
+
+            rerouted = (
+                winner_agent.replan_around(
+                    obstacle_position=(
+                        loser_agent.state.position
+                    ),
+                    obstacle_radius=(
+                        DYNAMIC_OBSTACLE_RADIUS
+                    ),
+                )
+            )
+
+            # --------------------------------------------------------------
+            # If A* cannot find a safe alternative, the winner stops too.
+            #
+            # This is much safer than allowing it to drive straight into
+            # the other robot.
+            # --------------------------------------------------------------
+
+            if not rerouted:
+
+                winner_agent.stop(
+                    reason="NO_SAFE_REROUTE"
+                )
+
+                print(
+                    f"[T={simulation_time:5.1f}s] "
+                    f"NO SAFE REROUTE: "
+                    f"{winner_agent.robot_id} "
+                    f"also stopped"
+                )
+
+                continue
 
             # --------------------------------------------------------------
             # Register active conflict.
@@ -424,7 +468,10 @@ def main():
             }
 
             conflict_count += 1
-            stop_events += 1
+
+            reroute_count += 1
+
+            stop_count += 1
 
             # --------------------------------------------------------------
             # Diagnostics.
@@ -461,23 +508,24 @@ def main():
             )
 
             print(
-                f"   Predicted TTC: "
+                f"   TTC: "
                 f"{conflict.time_to_conflict:.2f} s"
             )
 
             print(
-                f"   PROCEED: "
+                f"   PROCEED + REROUTE: "
                 f"{winner_agent.robot_id}"
             )
 
             print(
-                f"   STOP:    "
+                f"   STOP: "
                 f"{loser_agent.robot_id}"
             )
 
             print(
-                f"   Reason: "
-                f"{winner_decision.reason}"
+                f"   New path: "
+                f"{len(winner_agent.planned_path)} "
+                f"waypoints"
             )
 
             print(
@@ -486,12 +534,6 @@ def main():
 
         # ------------------------------------------------------------------
         # HARD SAFETY CHECK
-        #
-        # This is intentionally simple.
-        #
-        # If two robots actually get too close, stop both.
-        #
-        # This is a safety fallback, NOT the coordination algorithm.
         # ------------------------------------------------------------------
 
         for i in range(
@@ -516,15 +558,7 @@ def main():
                     < HARD_SAFETY_DISTANCE
                 ):
 
-                    # If they are already stopped due to coordination,
-                    # don't count it as a new collision event.
-
-                    if (
-                        not agent_a.stopped
-                        or not agent_b.stopped
-                    ):
-
-                        collision_count += 1
+                    safety_violations += 1
 
                     agent_a.stop(
                         reason="HARD_SAFETY"
@@ -535,7 +569,7 @@ def main():
                     )
 
         # ------------------------------------------------------------------
-        # Generate actions.
+        # ACTIONS
         # ------------------------------------------------------------------
 
         actions = [
@@ -544,7 +578,7 @@ def main():
         ]
 
         # ------------------------------------------------------------------
-        # Execute.
+        # SIMULATION STEP
         # ------------------------------------------------------------------
 
         env.step(
@@ -552,7 +586,7 @@ def main():
         )
 
         # ------------------------------------------------------------------
-        # Status.
+        # STATUS
         # ------------------------------------------------------------------
 
         if step % 20 == 0:
@@ -571,7 +605,7 @@ def main():
             )
 
         # ------------------------------------------------------------------
-        # Render.
+        # RENDER
         # ------------------------------------------------------------------
 
         if step % 2 == 0:
@@ -588,7 +622,9 @@ def main():
                     ]
                 )
 
-                if len(trajectory) < 2:
+                if len(
+                    trajectory
+                ) < 2:
 
                     continue
 
@@ -604,7 +640,7 @@ def main():
             )
 
         # ------------------------------------------------------------------
-        # Completion.
+        # COMPLETE
         # ------------------------------------------------------------------
 
         if all(
@@ -657,7 +693,7 @@ def main():
     )
 
     print(
-        "FINAL COORDINATION REPORT"
+        "FINAL NEXUS REPORT"
     )
 
     print(
@@ -687,13 +723,18 @@ def main():
     )
 
     print(
+        f"Dynamic reroutes: "
+        f"{reroute_count}"
+    )
+
+    print(
         f"Stop events: "
-        f"{stop_events}"
+        f"{stop_count}"
     )
 
     print(
         f"Safety violations: "
-        f"{collision_count}"
+        f"{safety_violations}"
     )
 
     print(
@@ -709,4 +750,5 @@ def main():
 # ==========================================================================
 
 if __name__ == "__main__":
+
     main()
