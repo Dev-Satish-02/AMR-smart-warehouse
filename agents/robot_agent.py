@@ -29,18 +29,18 @@ class RobotAgent:
     """
     NEXUS AMR agent.
 
-    Layers currently implemented:
+    Current control stack:
 
         A* path
           ↓
         waypoint following
           ↓
-        distributed coordination
+        reservation-aware coordination
           ↓
         differential-drive command
 
-    ORCA will later sit between coordination and
-    the final differential-drive command.
+    ORCA will later sit below the coordination layer
+    as the local collision-avoidance safety layer.
     """
 
     def __init__(self, robot_id, robot, planner=None):
@@ -50,7 +50,7 @@ class RobotAgent:
         self.planner = planner
 
         # ----------------------------------------------------------
-        # State
+        # STATE
         # ----------------------------------------------------------
 
         self.state = RobotState(
@@ -61,26 +61,26 @@ class RobotAgent:
         )
 
         # ----------------------------------------------------------
-        # Distributed world model
+        # DISTRIBUTED WORLD MODEL
         # ----------------------------------------------------------
 
         self.peer_states = {}
 
         # ----------------------------------------------------------
-        # Task
+        # TASK
         # ----------------------------------------------------------
 
         self.current_task = None
 
         # ----------------------------------------------------------
-        # Path
+        # PATH
         # ----------------------------------------------------------
 
         self.planned_path = []
         self.waypoint_index = 0
 
         # ----------------------------------------------------------
-        # Motion
+        # MOTION
         # ----------------------------------------------------------
 
         self.max_speed = 0.8
@@ -91,13 +91,24 @@ class RobotAgent:
         self.waypoint_tolerance = 0.25
 
         # ----------------------------------------------------------
-        # Coordination
+        # COORDINATION
         # ----------------------------------------------------------
 
         self.yielding = False
         self.yielding_to = None
+
+        # Physical point where the robot should wait.
         self.yield_position = None
+
+        # Conflict-zone information.
+        self.yield_zone_center = None
+        self.yield_zone_radius = 0.0
+
+        # Minimum time before a yield can be released.
         self.yield_until = 0.0
+
+        # If a robot itself has to wait for a reservation slot.
+        self.coordination_hold_until = 0.0
 
         self.intent = "IDLE"
 
@@ -171,17 +182,20 @@ class RobotAgent:
 
         self._read_simulation_state()
 
-        self.state.timestamp = (
-            simulation_time
-        )
+        self.state.timestamp = simulation_time
 
-        # Automatically release an expired yield.
+        # Do NOT automatically release a yield just because
+        # its nominal timer expired.
+        #
+        # The coordination controller decides when the
+        # conflict zone has actually become free.
+        #
+        # The timer remains only as a safety fallback.
         if (
             self.yielding
             and simulation_time >= self.yield_until
         ):
-
-            self.clear_yield()
+            self.intent = "YIELDING"
 
     # ==================================================================
     # P2P
@@ -392,12 +406,17 @@ class RobotAgent:
         yielding_to,
         yield_until,
         yield_position=None,
+        zone_center=None,
+        zone_radius=0.0,
     ):
         """
-        Put the robot into YIELD state.
+        Put the robot into a reservation-aware YIELD state.
 
-        The robot will stop instead of entering the
-        contested region.
+        The robot first travels toward yield_position.
+        Once it reaches that point, it stops and waits.
+
+        This is deliberately different from simply stopping
+        immediately at the robot's current position.
         """
 
         self.yielding = True
@@ -414,19 +433,40 @@ class RobotAgent:
                 yield_position,
                 dtype=float,
             )
+        else:
+
+            self.yield_position = (
+                self.state.position.copy()
+            )
+
+        if zone_center is not None:
+
+            self.yield_zone_center = np.asarray(
+                zone_center,
+                dtype=float,
+            )
+
+        else:
+
+            self.yield_zone_center = None
+
+        self.yield_zone_radius = float(
+            zone_radius
+        )
 
         self.intent = "YIELDING"
 
     def clear_yield(self):
-        """
-        Resume normal path execution.
-        """
 
         self.yielding = False
 
         self.yielding_to = None
 
         self.yield_position = None
+
+        self.yield_zone_center = None
+
+        self.yield_zone_radius = 0.0
 
         self.yield_until = 0.0
 
@@ -436,6 +476,19 @@ class RobotAgent:
         ):
 
             self.intent = "MOVING"
+
+    def set_coordination_hold(
+        self,
+        hold_until,
+    ):
+
+        self.coordination_hold_until = float(
+            hold_until
+        )
+
+    def clear_coordination_hold(self):
+
+        self.coordination_hold_until = 0.0
 
     # ==================================================================
     # DIFFERENTIAL DRIVE
@@ -450,62 +503,15 @@ class RobotAgent:
             2.0 * np.pi
         ) - np.pi
 
-    def desired_velocity(self):
+    def _velocity_toward(
+        self,
+        target,
+    ):
 
-        # ----------------------------------------------------------
-        # YIELD
-        # ----------------------------------------------------------
-
-        if self.yielding:
-
-            self.intent = "YIELDING"
-
-            return np.array(
-                [
-                    0.0,
-                    0.0,
-                ],
-                dtype=float,
-            )
-
-        # ----------------------------------------------------------
-        # No path
-        # ----------------------------------------------------------
-
-        if not self.planned_path:
-
-            self.intent = "IDLE"
-
-            return np.array(
-                [
-                    0.0,
-                    0.0,
-                ],
-                dtype=float,
-            )
-
-        # ----------------------------------------------------------
-        # Advance waypoint
-        # ----------------------------------------------------------
-
-        self.advance_waypoint()
-
-        if (
-            self.waypoint_index
-            >= len(self.planned_path)
-        ):
-
-            self.intent = "ARRIVED"
-
-            return np.array(
-                [
-                    0.0,
-                    0.0,
-                ],
-                dtype=float,
-            )
-
-        target = self.current_waypoint()
+        target = np.asarray(
+            target,
+            dtype=float,
+        )
 
         delta = (
             target
@@ -536,10 +542,6 @@ class RobotAgent:
             - self.state.heading
         )
 
-        # ----------------------------------------------------------
-        # Angular velocity
-        # ----------------------------------------------------------
-
         angular_velocity = (
             self.heading_gain
             * heading_error
@@ -551,10 +553,6 @@ class RobotAgent:
             self.max_angular_speed,
         )
 
-        # ----------------------------------------------------------
-        # Linear velocity
-        # ----------------------------------------------------------
-
         heading_factor = max(
             0.0,
             np.cos(heading_error),
@@ -565,7 +563,6 @@ class RobotAgent:
             * heading_factor
         )
 
-        # Slow down near waypoints.
         if distance < 1.0:
 
             linear_velocity *= min(
@@ -573,15 +570,11 @@ class RobotAgent:
                 distance / 0.5,
             )
 
-        # If facing strongly away from target,
-        # rotate before driving.
         if abs(heading_error) > np.deg2rad(
             70.0
         ):
 
             linear_velocity = 0.0
-
-        self.intent = "MOVING"
 
         return np.array(
             [
@@ -590,6 +583,121 @@ class RobotAgent:
             ],
             dtype=float,
         )
+
+    def desired_velocity(
+        self,
+        simulation_time=None,
+    ):
+
+        # ----------------------------------------------------------
+        # COORDINATION HOLD
+        # ----------------------------------------------------------
+
+        if (
+            simulation_time is not None
+            and simulation_time
+            < self.coordination_hold_until
+        ):
+
+            self.intent = "HOLDING"
+
+            return np.array(
+                [
+                    0.0,
+                    0.0,
+                ],
+                dtype=float,
+            )
+
+        # ----------------------------------------------------------
+        # YIELD
+        # ----------------------------------------------------------
+
+        if self.yielding:
+
+            self.intent = "YIELDING"
+
+            # No yield point means stop safely where we are.
+            if self.yield_position is None:
+
+                return np.array(
+                    [
+                        0.0,
+                        0.0,
+                    ],
+                    dtype=float,
+                )
+
+            distance_to_yield = np.linalg.norm(
+                self.yield_position
+                - self.state.position
+            )
+
+            # Drive toward the designated safe waiting point.
+            if (
+                distance_to_yield
+                > self.waypoint_tolerance
+            ):
+
+                return self._velocity_toward(
+                    self.yield_position
+                )
+
+            # Once at the yield point, STOP.
+            return np.array(
+                [
+                    0.0,
+                    0.0,
+                ],
+                dtype=float,
+            )
+
+        # ----------------------------------------------------------
+        # NO PATH
+        # ----------------------------------------------------------
+
+        if not self.planned_path:
+
+            self.intent = "IDLE"
+
+            return np.array(
+                [
+                    0.0,
+                    0.0,
+                ],
+                dtype=float,
+            )
+
+        # ----------------------------------------------------------
+        # ADVANCE WAYPOINT
+        # ----------------------------------------------------------
+
+        self.advance_waypoint()
+
+        if (
+            self.waypoint_index
+            >= len(self.planned_path)
+        ):
+
+            self.intent = "ARRIVED"
+
+            return np.array(
+                [
+                    0.0,
+                    0.0,
+                ],
+                dtype=float,
+            )
+
+        target = self.current_waypoint()
+
+        velocity = self._velocity_toward(
+            target
+        )
+
+        self.intent = "MOVING"
+
+        return velocity
 
     # ==================================================================
     # STATUS

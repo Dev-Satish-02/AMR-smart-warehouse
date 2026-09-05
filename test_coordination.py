@@ -9,6 +9,10 @@ from agents.robot_agent import RobotAgent
 from communication.p2p import P2PNetwork
 
 
+# ==========================================================================
+# ROBOT CONFIGURATION
+# ==========================================================================
+
 ROBOT_CONFIG = [
     ("R1", np.array([2.0, 3.0]), np.array([28.0, 17.0])),
     ("R2", np.array([2.0, 7.0]), np.array([28.0, 13.0])),
@@ -20,23 +24,56 @@ ROBOT_CONFIG = [
 ]
 
 
+# ==========================================================================
+# HELPERS
+# ==========================================================================
+
+def reservation_is_stored(reservation, reservations):
+    """
+    Check whether a specific Reservation object is still stored.
+
+    IMPORTANT:
+    Do NOT use:
+
+        reservation in reservations
+
+    because Reservation contains NumPy arrays. Dataclass equality then
+    compares arrays element-by-element and can raise:
+
+        ValueError:
+        The truth value of an array with more than one element is ambiguous.
+
+    Identity comparison is safe because we want to know whether this exact
+    reservation object is still active.
+    """
+
+    return any(
+        stored_reservation is reservation
+        for stored_reservation in reservations
+    )
+
+
+# ==========================================================================
+# MAIN
+# ==========================================================================
+
 def main():
 
     print("=" * 72)
     print("             NEXUS ACTIVE COORDINATION")
     print("=" * 72)
 
-    # ==============================================================
+    # ======================================================================
     # ENVIRONMENT
-    # ==============================================================
+    # ======================================================================
 
     env = irsim.make(
         "configs/warehouse.yaml"
     )
 
-    # ==============================================================
+    # ======================================================================
     # NEXUS MODULES
-    # ==============================================================
+    # ======================================================================
 
     planner = NEXUSPlanner()
 
@@ -50,9 +87,9 @@ def main():
 
     network = P2PNetwork()
 
-    # ==============================================================
+    # ======================================================================
     # CREATE ROBOT AGENTS
-    # ==============================================================
+    # ======================================================================
 
     agents = []
 
@@ -93,27 +130,34 @@ def main():
     print("Planning: A*")
     print("Conflict prediction: 4.0 s horizon")
     print("Safety distance: 0.90 m")
-    print("Coordination: ETA-based negotiation")
+    print("Coordination: Reservation-aware negotiation")
     print()
 
-    # ==============================================================
+    # ======================================================================
     # TRAJECTORY HISTORY
-    # ==============================================================
+    # ======================================================================
 
     trajectories = {
         agent.robot_id: []
         for agent in agents
     }
 
-    # ==============================================================
+    # ======================================================================
     # ACTIVE NEGOTIATIONS
-    # ==============================================================
+    #
+    # Maps:
+    #
+    #     (robot_a, robot_b) -> Reservation object
+    #
+    # The Reservation object itself is retained so that we can use identity
+    # comparison rather than NumPy-array-based dataclass equality.
+    # ======================================================================
 
     active_negotiations = {}
 
-    # ==============================================================
+    # ======================================================================
     # SIMULATION
-    # ==============================================================
+    # ======================================================================
 
     simulation_time = 0.0
 
@@ -121,9 +165,9 @@ def main():
 
     for step in range(max_steps):
 
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
         # Update all agents
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
 
         for agent in agents:
 
@@ -137,31 +181,62 @@ def main():
                 agent.state.position.copy()
             )
 
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
         # Remove expired reservations
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
 
         negotiation.reservations.clear_expired(
             simulation_time
         )
 
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
+        # Clean active negotiation references
+        #
+        # IMPORTANT:
+        #
+        # We use object identity here:
+        #
+        #     stored_reservation is reservation
+        #
+        # instead of:
+        #
+        #     reservation in reservations
+        #
+        # because Reservation contains NumPy arrays.
+        # ------------------------------------------------------------------
+
+        for pair in list(active_negotiations.keys()):
+
+            reservation = active_negotiations[pair]
+
+            # If the exact reservation object is still present, keep
+            # the pair locked against repeated negotiation.
+            if reservation_is_stored(
+                reservation,
+                negotiation.reservations.reservations,
+            ):
+                continue
+
+            # Reservation has expired / been removed.
+            del active_negotiations[pair]
+
+        # ------------------------------------------------------------------
         # P2P state exchange
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
 
         network.broadcast_all()
 
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
         # Predict future conflicts
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
 
         conflicts = detector.detect_all(
             agents
         )
 
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
         # Process predicted conflicts
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
 
         for conflict in conflicts:
 
@@ -174,16 +249,16 @@ def main():
                 )
             )
 
-            # ------------------------------------------------------
-            # Check whether this pair already has an active
-            # negotiation.
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
+            # Check whether this pair already has an active negotiation.
+            #
+            # We deliberately use the reservation object's exit_time
+            # instead of equality against a NumPy-containing dataclass.
+            # --------------------------------------------------------------
 
             if pair in active_negotiations:
 
-                reservation = (
-                    active_negotiations[pair]
-                )
+                reservation = active_negotiations[pair]
 
                 if (
                     simulation_time
@@ -192,13 +267,16 @@ def main():
 
                     continue
 
-                del active_negotiations[
-                    pair
-                ]
+                # The reservation's time has elapsed.
+                #
+                # Remove it from active pair tracking. The reservation
+                # manager itself is responsible for removing expired
+                # reservations through clear_expired().
+                del active_negotiations[pair]
 
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
             # Find actual RobotAgent objects.
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
 
             agent_a = next(
                 agent
@@ -214,9 +292,9 @@ def main():
                 == conflict.robot_b
             )
 
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
             # NEGOTIATION
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
 
             (
                 winner_decision,
@@ -229,17 +307,14 @@ def main():
                 simulation_time,
             )
 
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
             # IMPORTANT:
             #
-            # winner_decision / loser_decision are NOT RobotAgent
-            # objects.
+            # winner_decision / loser_decision are NegotiationDecision
+            # objects, not RobotAgent objects.
             #
-            # They are NegotiationDecision objects.
-            #
-            # Therefore we use their robot_id to retrieve the
-            # corresponding RobotAgent.
-            # ------------------------------------------------------
+            # Retrieve the corresponding RobotAgent using robot_id.
+            # --------------------------------------------------------------
 
             winner_agent = next(
                 agent
@@ -255,15 +330,15 @@ def main():
                 == loser_decision.robot_id
             )
 
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
             # WINNER
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
 
             winner_agent.clear_yield()
 
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
             # LOSER
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
 
             loser_agent.set_yield(
                 yielding_to=winner_agent.robot_id,
@@ -273,17 +348,17 @@ def main():
                 ),
             )
 
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
             # Store active negotiation.
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
 
             active_negotiations[
                 pair
             ] = reservation
 
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
             # Diagnostics
-            # ------------------------------------------------------
+            # --------------------------------------------------------------
 
             print()
             print(
@@ -336,28 +411,43 @@ def main():
                 f"{reservation.exit_time:.2f}s"
             )
 
+            # --------------------------------------------------------------
+            # If the reservation implementation exposes a resource radius,
+            # print it when available.
+            # --------------------------------------------------------------
+
+            if hasattr(
+                reservation,
+                "zone_radius",
+            ):
+
+                print(
+                    f"   Zone radius: "
+                    f"{reservation.zone_radius:.2f} m"
+                )
+
             print(
                 "-" * 72
             )
 
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
         # Generate robot actions
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
 
         actions = [
             agent.desired_velocity()
             for agent in agents
         ]
 
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
         # Execute NEXUS commands
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
 
         env.step(actions)
 
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
         # Diagnostics
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
 
         if step % 20 == 0:
 
@@ -374,15 +464,16 @@ def main():
                 )
             )
 
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
         # Render
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
 
         if step % 2 == 0:
 
             env.render(0.001)
 
             # Draw actual trajectories.
+
             for agent in agents:
 
                 trajectory = np.asarray(
@@ -403,9 +494,9 @@ def main():
 
             plt.pause(0.001)
 
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
         # Completion
-        # ----------------------------------------------------------
+        # ------------------------------------------------------------------
 
         if all(
             agent.intent == "ARRIVED"
@@ -428,9 +519,9 @@ def main():
         print("SIMULATION TIMEOUT")
         print("=" * 72)
 
-        # ==============================================================
+    # ======================================================================
     # FINAL REPORT
-    # ==============================================================
+    # ======================================================================
 
     print()
     print("=" * 72)
@@ -466,6 +557,10 @@ def main():
 
     env.end()
 
+
+# ==========================================================================
+# ENTRY POINT
+# ==========================================================================
 
 if __name__ == "__main__":
     main()
