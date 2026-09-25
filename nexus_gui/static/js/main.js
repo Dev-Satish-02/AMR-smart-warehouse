@@ -1,6 +1,6 @@
 import { MapView } from "./map.js";
 import { Editor } from "./editor.js";
-import { loadCatalog } from "./catalog.js";
+import { loadCatalog, objectType } from "./catalog.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -273,21 +273,33 @@ function addEvents(events, animate) {
   while (list.children.length > 150) list.lastChild.remove();
 }
 
+// Legend for what this layout actually contains, so it stays short.
 function renderLegend() {
+  const layout = app.layout;
+  const chars = new Set(layout.rows.join(""));
+  const types = new Set((layout.objects || []).map((o) => o.type));
+  const families = new Set([...types].map((t) => objectType(t).family));
+  const stations = new Set(layout.stations.map((s) => s.type));
   const item = (swatch, label) => `<span class="legend-item">${swatch}${label}</span>`;
-  const box = (fill, stroke = "none") => `<svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="${fill}" stroke="${stroke}" stroke-width="1.2"/></svg>`;
-  $("#legend").innerHTML = [
-    item(`<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="3" fill="var(--lane)"/><path d="M1 8h14" stroke="var(--lane-edge)" stroke-width="1.6"/><circle cx="8" cy="8" r="1.8" fill="var(--lane-node)"/></svg>`, "Lane"),
-    item(`<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="3" fill="var(--lane)"/><path d="M6 4.5 9.5 8 6 11.5" fill="none" stroke="var(--lane-node)" stroke-width="1.8" stroke-linecap="round"/></svg>`, "One-way"),
-    item(box("var(--shelf)", "var(--shelf-line)"), "Shelf"),
-    item(box("var(--wall)"), "Wall"),
-    item(`<svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="rgba(201,162,39,0.25)" stroke="rgba(201,162,39,0.7)"/></svg>`, "Human only"),
-    item(`<svg viewBox="0 0 16 16"><use href="#st-loading" width="16" height="16" color="var(--text)"/></svg>`, "Loading"),
-    item(`<svg viewBox="0 0 16 16"><use href="#st-unloading" width="16" height="16" color="var(--text)"/></svg>`, "Unloading"),
-    item(`<svg viewBox="0 0 16 16"><use href="#st-workstation" width="16" height="16" color="var(--text)"/></svg>`, "Workstation"),
-    item(`<svg viewBox="0 0 16 16"><use href="#st-charging" width="16" height="16" color="var(--text)"/></svg>`, "Charging"),
-    item(`<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="var(--critical)" stroke-width="1.8"/><circle cx="8" cy="8" r="1.6" fill="var(--critical)"/></svg>`, "Predicted conflict"),
-  ].join("");
+  const box = (fill, stroke = "none", extra = "") => `<svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="${fill}" stroke="${stroke}" stroke-width="1.2" ${extra}/></svg>`;
+  const icon = (id) => `<svg viewBox="0 0 16 16"><use href="#${id}" width="16" height="16" color="var(--text)"/></svg>`;
+  const items = [
+    item(`<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="3" fill="var(--lane)"/><path d="M1 8h14" stroke="var(--lane-edge)" stroke-width="1.6"/><circle cx="8" cy="8" r="1.8" fill="var(--lane-node)"/></svg>`, "Robot lane"),
+  ];
+  if ([">", "<", "^", "v"].some((c) => chars.has(c))) {
+    items.push(item(`<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="3" fill="var(--lane)"/><path d="M6 4.5 9.5 8 6 11.5" fill="none" stroke="var(--lane-node)" stroke-width="1.8" stroke-linecap="round"/></svg>`, "One-way"));
+  }
+  if (chars.has("W")) items.push(item(`<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" fill="var(--walkway)"/><path d="M2 2v12M14 2v12" stroke="var(--walkway-edge)" stroke-width="1.6"/></svg>`, "Walkway"));
+  if (types.has("crosswalk")) items.push(item(`<svg viewBox="0 0 16 16"><path d="M3 2v12M6.3 2v12M9.6 2v12M12.9 2v12" stroke="var(--crosswalk)" stroke-width="2"/></svg>`, "Crosswalk"));
+  if (types.has("slow_zone")) items.push(item(box("rgba(201,162,39,0.08)", "var(--zone-slow)", 'stroke-dasharray="3 2"'), "Slow zone"));
+  if (chars.has("S") || families.has("storage")) items.push(item(box("var(--shelf)", "var(--storage-stroke)"), "Rack"));
+  if (families.has("production") || families.has("facility")) items.push(item(box("var(--production-fill)", "var(--production-stroke)"), "Equipment"));
+  if (families.has("area")) items.push(item(box("var(--area-fill)", "var(--area-stroke)", 'stroke-dasharray="3 2"'), "Area"));
+  if (chars.has("H")) items.push(item(`<svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="rgba(201,162,39,0.25)" stroke="rgba(201,162,39,0.7)"/></svg>`, "Human only"));
+  const stationNames = { loading: "Loading", unloading: "Unloading", workstation: "Workstation", charging: "Charging" };
+  for (const [type, label] of Object.entries(stationNames)) if (stations.has(type)) items.push(item(icon(`st-${type}`), label));
+  items.push(item(`<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="var(--critical)" stroke-width="1.8"/><circle cx="8" cy="8" r="1.6" fill="var(--critical)"/></svg>`, "Predicted conflict"));
+  $("#legend").innerHTML = items.join("");
 }
 
 // ------------------------------------------------------------------ selection

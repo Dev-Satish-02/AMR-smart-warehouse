@@ -1,0 +1,804 @@
+{
+  "version": 1,
+  "name": "BEL Warehouse (Prototype)",
+  "cell_size": 1,
+  "width": 64,
+  "height": 40,
+  "rows": [
+    "################################################################",
+    "#....................HHHHHHH...................................#",
+    "#....................HHHHHHH...................................#",
+    "#....................HHHHHHH...................................#",
+    "#WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW#",
+    "#WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW#",
+    "#.++<<<<<<<<++<<<<<<<<<<<<<<<<<++<<<<<++<<<<<<<<<<<<<++........#",
+    "#.++>>>>>>>>++>>+>>>+>>>+>>>+>>++>>>>>++>>>>>>>>>>>>>++........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.............v^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v+........#",
+    "#.+^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv+.W...........v^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........+^.WWWWWW.#",
+    "#.v^........+^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.WWWWWWWWWWW.v+........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v^........#",
+    "#.+^........v^W.^.W.v.W.^.W.v.Wv+....Wv+.W...........v^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........+^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v^........#",
+    "#.v^........v^W.^.W.+.W.^.W.+.Wv^....Wv^.W...........v^........#",
+    "#.v^........v^W.+.W.v.W.+.W.v.Wv^....Wv^.WWWWWWWWWWW.v^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v^........#",
+    "#.+^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v+........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv+.W...........v^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv+....Wv^.WWWWWWWWWWW.v^........#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........+^........#",
+    "#.+^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v^........#",
+    "#.v^........+^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........++<<<<<++.#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv+.W...........++>>>>>++.#",
+    "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v^........#",
+    "#.v^........v^..^...v...^...v..v^....Wv^.............v^........#",
+    "#.++<<<<<<<<++<<+<<<+<<<+<<<+<<++<<<<<++<<<<<<<<<<<<<++........#",
+    "#.++>>>>>>>>++>>+>+>+>+>>>>>>>>++>>>>>++>>>>>>>>>>>>>++........#",
+    "#..............................................................#",
+    "#..............................................................#",
+    "#..............................................................#",
+    "################################################################"
+  ],
+  "stations": [
+    {
+      "id": "RD1",
+      "type": "loading",
+      "x": 1,
+      "y": 10,
+      "label": "Receiving Dock 1"
+    },
+    {
+      "id": "RD2",
+      "type": "loading",
+      "x": 1,
+      "y": 16,
+      "label": "Receiving Dock 2"
+    },
+    {
+      "id": "RD3",
+      "type": "loading",
+      "x": 1,
+      "y": 22,
+      "label": "Receiving Dock 3"
+    },
+    {
+      "id": "RD4",
+      "type": "loading",
+      "x": 1,
+      "y": 28,
+      "label": "Receiving Dock 4"
+    },
+    {
+      "id": "INS",
+      "type": "workstation",
+      "x": 11,
+      "y": 25,
+      "label": "Inspection Bay"
+    },
+    {
+      "id": "QRN",
+      "type": "workstation",
+      "x": 11,
+      "y": 9,
+      "label": "Quarantine Cage"
+    },
+    {
+      "id": "STA",
+      "type": "workstation",
+      "x": 15,
+      "y": 18,
+      "label": "Stores Pick A"
+    },
+    {
+      "id": "STB",
+      "type": "workstation",
+      "x": 21,
+      "y": 19,
+      "label": "Stores Pick B"
+    },
+    {
+      "id": "STC",
+      "type": "workstation",
+      "x": 23,
+      "y": 18,
+      "label": "Stores Pick C"
+    },
+    {
+      "id": "STD",
+      "type": "workstation",
+      "x": 29,
+      "y": 19,
+      "label": "Stores Pick D"
+    },
+    {
+      "id": "KIN",
+      "type": "workstation",
+      "x": 33,
+      "y": 12,
+      "label": "Kitting In"
+    },
+    {
+      "id": "KOUT",
+      "type": "workstation",
+      "x": 33,
+      "y": 22,
+      "label": "Kitting Out"
+    },
+    {
+      "id": "S1IN",
+      "type": "workstation",
+      "x": 40,
+      "y": 27,
+      "label": "SMT-1 Feeder"
+    },
+    {
+      "id": "S1OUT",
+      "type": "workstation",
+      "x": 52,
+      "y": 26,
+      "label": "SMT-1 Output"
+    },
+    {
+      "id": "S2IN",
+      "type": "workstation",
+      "x": 40,
+      "y": 22,
+      "label": "SMT-2 Feeder"
+    },
+    {
+      "id": "S2OUT",
+      "type": "workstation",
+      "x": 52,
+      "y": 21,
+      "label": "SMT-2 Output"
+    },
+    {
+      "id": "ASM",
+      "type": "workstation",
+      "x": 40,
+      "y": 15,
+      "label": "Assembly Cell"
+    },
+    {
+      "id": "QCIN",
+      "type": "workstation",
+      "x": 40,
+      "y": 8,
+      "label": "QC Intake"
+    },
+    {
+      "id": "QCOUT",
+      "type": "workstation",
+      "x": 52,
+      "y": 11,
+      "label": "QC Release"
+    },
+    {
+      "id": "PK1",
+      "type": "workstation",
+      "x": 55,
+      "y": 24,
+      "label": "Packing In 1"
+    },
+    {
+      "id": "PK2",
+      "type": "workstation",
+      "x": 55,
+      "y": 16,
+      "label": "Packing In 2"
+    },
+    {
+      "id": "FG",
+      "type": "workstation",
+      "x": 55,
+      "y": 29,
+      "label": "Finished Goods"
+    },
+    {
+      "id": "DD1",
+      "type": "unloading",
+      "x": 62,
+      "y": 8,
+      "label": "Dispatch Dock 1"
+    },
+    {
+      "id": "DD2",
+      "type": "unloading",
+      "x": 62,
+      "y": 9,
+      "label": "Dispatch Dock 2"
+    },
+    {
+      "id": "CH1",
+      "type": "charging",
+      "x": 16,
+      "y": 3,
+      "label": "Charger 1"
+    },
+    {
+      "id": "CH2",
+      "type": "charging",
+      "x": 18,
+      "y": 3,
+      "label": "Charger 2"
+    },
+    {
+      "id": "CH3",
+      "type": "charging",
+      "x": 20,
+      "y": 3,
+      "label": "Charger 3"
+    },
+    {
+      "id": "CH4",
+      "type": "charging",
+      "x": 22,
+      "y": 3,
+      "label": "Charger 4"
+    }
+  ],
+  "robots": [
+    {
+      "id": "R1",
+      "start": "RD1",
+      "goal": "INS",
+      "via": [],
+      "loop": true
+    },
+    {
+      "id": "R2",
+      "start": "RD2",
+      "goal": "STA",
+      "via": [],
+      "loop": true
+    },
+    {
+      "id": "R3",
+      "start": "RD4",
+      "goal": "STB",
+      "via": [],
+      "loop": true,
+      "max_speed": 0.8
+    },
+    {
+      "id": "R4",
+      "start": "STC",
+      "goal": "KIN",
+      "via": [],
+      "loop": true
+    },
+    {
+      "id": "R5",
+      "start": "STD",
+      "goal": "S2IN",
+      "via": [],
+      "loop": true
+    },
+    {
+      "id": "R6",
+      "start": "KOUT",
+      "goal": "S1IN",
+      "via": [
+        [
+          32,
+          30
+        ]
+      ],
+      "loop": true
+    },
+    {
+      "id": "R7",
+      "start": "S1OUT",
+      "goal": "QCIN",
+      "via": [],
+      "loop": true
+    },
+    {
+      "id": "R8",
+      "start": "QCOUT",
+      "goal": "PK1",
+      "via": [],
+      "loop": true
+    },
+    {
+      "id": "R9",
+      "start": "PK2",
+      "goal": "DD1",
+      "via": [],
+      "loop": true
+    },
+    {
+      "id": "R10",
+      "start": "FG",
+      "goal": "DD2",
+      "via": [],
+      "loop": true
+    },
+    {
+      "id": "R11",
+      "start": "RD3",
+      "goal": "ASM",
+      "via": [],
+      "loop": true
+    },
+    {
+      "id": "R12",
+      "start": "CH1",
+      "goal": "QRN",
+      "via": []
+    }
+  ],
+  "objects": [
+    {
+      "id": "O1",
+      "type": "rack",
+      "name": "Rack A-01",
+      "x": 15,
+      "y": 8,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O2",
+      "type": "rack",
+      "name": "Rack A-02",
+      "x": 15,
+      "y": 20,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O3",
+      "type": "rack",
+      "name": "Rack B-01",
+      "x": 17,
+      "y": 8,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O4",
+      "type": "rack",
+      "name": "Rack B-02",
+      "x": 17,
+      "y": 20,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O5",
+      "type": "rack",
+      "name": "Rack C-01",
+      "x": 19,
+      "y": 8,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O6",
+      "type": "rack",
+      "name": "Rack C-02",
+      "x": 19,
+      "y": 20,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O7",
+      "type": "rack",
+      "name": "Rack D-01",
+      "x": 21,
+      "y": 8,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O8",
+      "type": "rack",
+      "name": "Rack D-02",
+      "x": 21,
+      "y": 20,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O9",
+      "type": "rack",
+      "name": "Rack E-01",
+      "x": 23,
+      "y": 8,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O10",
+      "type": "rack",
+      "name": "Rack E-02",
+      "x": 23,
+      "y": 20,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O11",
+      "type": "rack",
+      "name": "Rack F-01",
+      "x": 25,
+      "y": 8,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O12",
+      "type": "rack",
+      "name": "Rack F-02",
+      "x": 25,
+      "y": 20,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O13",
+      "type": "rack",
+      "name": "Rack G-01",
+      "x": 27,
+      "y": 8,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O14",
+      "type": "rack",
+      "name": "Rack G-02",
+      "x": 27,
+      "y": 20,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O15",
+      "type": "rack",
+      "name": "Rack H-01",
+      "x": 29,
+      "y": 8,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O16",
+      "type": "rack",
+      "name": "Rack H-02",
+      "x": 29,
+      "y": 20,
+      "w": 1,
+      "h": 10
+    },
+    {
+      "id": "O17",
+      "type": "crosswalk",
+      "name": "Crosswalk 1",
+      "x": 14,
+      "y": 32,
+      "w": 1,
+      "h": 2
+    },
+    {
+      "id": "O18",
+      "type": "crosswalk",
+      "name": "Crosswalk 2",
+      "x": 18,
+      "y": 32,
+      "w": 1,
+      "h": 2
+    },
+    {
+      "id": "O19",
+      "type": "crosswalk",
+      "name": "Crosswalk 3",
+      "x": 22,
+      "y": 32,
+      "w": 1,
+      "h": 2
+    },
+    {
+      "id": "O20",
+      "type": "crosswalk",
+      "name": "Crosswalk 4",
+      "x": 26,
+      "y": 32,
+      "w": 1,
+      "h": 2
+    },
+    {
+      "id": "O21",
+      "type": "crosswalk",
+      "name": "Crosswalk 5",
+      "x": 30,
+      "y": 32,
+      "w": 1,
+      "h": 2
+    },
+    {
+      "id": "O22",
+      "type": "crosswalk",
+      "name": "Crosswalk 6",
+      "x": 37,
+      "y": 32,
+      "w": 1,
+      "h": 2
+    },
+    {
+      "id": "O23",
+      "type": "inspection_area",
+      "name": "Incoming Inspection",
+      "x": 4,
+      "y": 20,
+      "w": 8,
+      "h": 11
+    },
+    {
+      "id": "O24",
+      "type": "test_bay",
+      "name": "Inspection Bench",
+      "x": 5,
+      "y": 23,
+      "w": 5,
+      "h": 4
+    },
+    {
+      "id": "O25",
+      "type": "quarantine_area",
+      "name": "Quarantine",
+      "x": 4,
+      "y": 7,
+      "w": 8,
+      "h": 7
+    },
+    {
+      "id": "O26",
+      "type": "stores_cage",
+      "name": "Quarantine Cage",
+      "x": 5,
+      "y": 8,
+      "w": 5,
+      "h": 4
+    },
+    {
+      "id": "O27",
+      "type": "kitting_area",
+      "name": "Kitting",
+      "x": 33,
+      "y": 6,
+      "w": 5,
+      "h": 26
+    },
+    {
+      "id": "O28",
+      "type": "assembly_bench",
+      "name": "Kitting Bench 1",
+      "x": 35,
+      "y": 9,
+      "w": 2,
+      "h": 6
+    },
+    {
+      "id": "O29",
+      "type": "assembly_bench",
+      "name": "Kitting Bench 2",
+      "x": 35,
+      "y": 19,
+      "w": 2,
+      "h": 7
+    },
+    {
+      "id": "O30",
+      "type": "esd_area",
+      "name": "ESD Protected Area",
+      "x": 40,
+      "y": 6,
+      "w": 13,
+      "h": 26
+    },
+    {
+      "id": "O31",
+      "type": "smt_line",
+      "name": "SMT Line 1",
+      "x": 42,
+      "y": 26,
+      "w": 10,
+      "h": 2
+    },
+    {
+      "id": "O32",
+      "type": "smt_line",
+      "name": "SMT Line 2",
+      "x": 42,
+      "y": 21,
+      "w": 10,
+      "h": 2
+    },
+    {
+      "id": "O33",
+      "type": "assembly_bench",
+      "name": "Assembly Bench 1",
+      "x": 42,
+      "y": 14,
+      "w": 4,
+      "h": 3
+    },
+    {
+      "id": "O34",
+      "type": "assembly_bench",
+      "name": "Assembly Bench 2",
+      "x": 48,
+      "y": 14,
+      "w": 4,
+      "h": 3
+    },
+    {
+      "id": "O35",
+      "type": "test_bay",
+      "name": "Test & QC Bay",
+      "x": 42,
+      "y": 7,
+      "w": 10,
+      "h": 4
+    },
+    {
+      "id": "O36",
+      "type": "packing_station",
+      "name": "Packing Station 1",
+      "x": 57,
+      "y": 22,
+      "w": 3,
+      "h": 4
+    },
+    {
+      "id": "O37",
+      "type": "packing_station",
+      "name": "Packing Station 2",
+      "x": 57,
+      "y": 14,
+      "w": 3,
+      "h": 4
+    },
+    {
+      "id": "O38",
+      "type": "conveyor",
+      "name": "Outbound Conveyor",
+      "x": 57,
+      "y": 19,
+      "w": 5,
+      "h": 2
+    },
+    {
+      "id": "O39",
+      "type": "stores_cage",
+      "name": "Finished Goods Store",
+      "x": 57,
+      "y": 28,
+      "w": 5,
+      "h": 4
+    },
+    {
+      "id": "O40",
+      "type": "staging_area",
+      "name": "Dispatch Staging",
+      "x": 55,
+      "y": 6,
+      "w": 8,
+      "h": 7
+    },
+    {
+      "id": "O41",
+      "type": "staging_area",
+      "name": "AMR Charging Bay",
+      "x": 14,
+      "y": 1,
+      "w": 11,
+      "h": 3
+    },
+    {
+      "id": "O42",
+      "type": "forklift_parking",
+      "name": "Forklift Parking",
+      "x": 40,
+      "y": 1,
+      "w": 8,
+      "h": 3
+    },
+    {
+      "id": "O43",
+      "type": "machine",
+      "name": "Maintenance Workshop",
+      "x": 50,
+      "y": 1,
+      "w": 9,
+      "h": 3
+    },
+    {
+      "id": "O44",
+      "type": "control_room",
+      "name": "Fleet Control Room",
+      "x": 2,
+      "y": 36,
+      "w": 8,
+      "h": 3
+    },
+    {
+      "id": "O45",
+      "type": "office",
+      "name": "Production Office",
+      "x": 11,
+      "y": 36,
+      "w": 9,
+      "h": 3
+    },
+    {
+      "id": "O46",
+      "type": "office",
+      "name": "Training Room",
+      "x": 29,
+      "y": 36,
+      "w": 8,
+      "h": 3
+    },
+    {
+      "id": "O47",
+      "type": "test_bay",
+      "name": "Quality Lab",
+      "x": 38,
+      "y": 36,
+      "w": 10,
+      "h": 3
+    },
+    {
+      "id": "O48",
+      "type": "office",
+      "name": "Stores Office",
+      "x": 49,
+      "y": 36,
+      "w": 7,
+      "h": 3
+    },
+    {
+      "id": "O49",
+      "type": "office",
+      "name": "Security",
+      "x": 57,
+      "y": 36,
+      "w": 6,
+      "h": 3
+    },
+    {
+      "id": "O50",
+      "type": "slow_zone",
+      "name": "Receiving Apron",
+      "x": 2,
+      "y": 8,
+      "w": 2,
+      "h": 23,
+      "speed_limit": 0.5
+    },
+    {
+      "id": "O51",
+      "type": "slow_zone",
+      "name": "ESD Feeder Road",
+      "x": 38,
+      "y": 19,
+      "w": 2,
+      "h": 11,
+      "speed_limit": 0.5
+    }
+  ],
+  "simulation": {
+    "max_time": 1800
+  }
+}
