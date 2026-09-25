@@ -2,6 +2,8 @@
 // World units are metres; cell (x, y) spans [x, x+1] x [y, y+1] * cellSize,
 // with y pointing up. The SVG y axis is flipped via sy().
 
+import { labelPlacement } from "./grid-ops.js";
+
 const NS = "http://www.w3.org/2000/svg";
 
 export const ONE_WAY = { ">": [1, 0], "<": [-1, 0], "^": [0, 1], "v": [0, -1] };
@@ -200,24 +202,23 @@ export class MapView {
             if (this._char(nx, ny) === "H" && !seen.has(key)) { seen.add(key); stack.push([nx, ny]); }
           }
         }
-        const xs = cells.map((c) => c[0]), ys = cells.map((c) => c[1]);
-        const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-        const w = maxX - minX + 1, h = maxY - minY + 1;
-        const mx = (minX + maxX + 1) / 2 * this.cs, my = (minY + maxY + 1) / 2 * this.cs;
-        const vertical = h > w * 1.5;
-        const g = el("g", { transform: `translate(${mx} ${this.sy(my)})${vertical ? " rotate(-90)" : ""}` }, this.gZones);
-        const long = Math.max(w, h);
-        if (long >= 3 && Math.min(w, h) >= 1) {
-          const size = Math.min(0.42, Math.min(w, h) * 0.45);
-          const label = long >= 6 ? "HUMAN ONLY" : "HUMAN";
-          const textWidth = label.length * size * 0.68;
-          const icon = size * 1.15;
-          const gap = size * 0.35;
-          const left = -(icon + gap + textWidth) / 2;
-          el("use", { href: "#i-person", x: left, y: -icon / 2, width: icon, height: icon, color: "rgba(201,162,39,0.9)" }, g);
-          const text = el("text", { x: left + icon + gap, y: size * 0.36, "font-size": size, "font-weight": 800, "letter-spacing": 0.04, fill: "rgba(201,162,39,0.9)" }, g);
-          text.textContent = label;
-        }
+        // Label on the zone's longest straight strip: the bounding-box
+        // centre of a ring or L-shaped zone is not part of the zone.
+        const spot = labelPlacement(cells);
+        if (!spot || spot.length < 3) continue;
+        const size = Math.min(0.42, spot.thickness * 0.45);
+        const icon = size * 1.15;
+        const gap = size * 0.35;
+        const fits = (text) => icon + gap + text.length * size * 0.68 <= spot.length * this.cs * 0.9;
+        const label = fits("HUMAN ONLY") ? "HUMAN ONLY" : fits("HUMAN") ? "HUMAN" : null;
+        if (!label) continue;
+        const mx = spot.cx * this.cs, my = spot.cy * this.cs;
+        const g = el("g", { transform: `translate(${mx} ${this.sy(my)})${spot.horizontal ? "" : " rotate(-90)"}` }, this.gZones);
+        const textWidth = label.length * size * 0.68;
+        const left = -(icon + gap + textWidth) / 2;
+        el("use", { href: "#i-person", x: left, y: -icon / 2, width: icon, height: icon, color: "rgba(201,162,39,0.9)" }, g);
+        const text = el("text", { x: left + icon + gap, y: size * 0.36, "font-size": size, "font-weight": 800, "letter-spacing": 0.04, fill: "rgba(201,162,39,0.9)" }, g);
+        text.textContent = label;
       }
     }
   }

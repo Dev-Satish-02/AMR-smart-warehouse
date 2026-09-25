@@ -347,6 +347,75 @@ function initControls() {
   });
 }
 
+// ------------------------------------------------------------------ splitter
+
+// Resizable side panel: drag the divider, double-click to reset, or focus it
+// and use the arrow keys. The width is remembered per browser.
+const SIDE_DEFAULT = 380;
+const SIDE_MIN = 280;
+const SIDE_KEY = "nexus.sideWidth";
+
+function sideLimits() {
+  const main = $("#main");
+  const max = Math.max(SIDE_MIN, Math.min(900, main.clientWidth - 40 - 16 - 420)); // keep >= 420px of map
+  return { min: SIDE_MIN, max };
+}
+
+function setSideWidth(px, { save = true } = {}) {
+  const { min, max } = sideLimits();
+  const width = Math.round(Math.min(max, Math.max(min, px)));
+  $("#main").style.setProperty("--side-width", `${width}px`);
+  $("#splitter").setAttribute("aria-valuenow", String(width));
+  if (save) { try { localStorage.setItem(SIDE_KEY, String(width)); } catch { /* storage unavailable */ } }
+  return width;
+}
+
+function initSplitter() {
+  const splitter = $("#splitter");
+  const main = $("#main");
+  let saved = SIDE_DEFAULT;
+  try { saved = Number(localStorage.getItem(SIDE_KEY)) || SIDE_DEFAULT; } catch { /* storage unavailable */ }
+  setSideWidth(saved, { save: false });
+
+  splitter.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    splitter.setPointerCapture(event.pointerId);
+    splitter.classList.add("dragging");
+    document.body.classList.add("resizing");
+  });
+  splitter.addEventListener("pointermove", (event) => {
+    if (!splitter.hasPointerCapture(event.pointerId)) return;
+    const rect = main.getBoundingClientRect();
+    const padding = parseFloat(getComputedStyle(main).paddingRight) || 0;
+    // Side panel spans from just right of the handle to the padded edge.
+    setSideWidth(rect.right - padding - event.clientX - splitter.offsetWidth / 2, { save: false });
+  });
+  const end = (event) => {
+    if (!splitter.hasPointerCapture(event.pointerId)) return;
+    splitter.releasePointerCapture(event.pointerId);
+    splitter.classList.remove("dragging");
+    document.body.classList.remove("resizing");
+    setSideWidth(parseFloat(main.style.getPropertyValue("--side-width")) || SIDE_DEFAULT);
+  };
+  splitter.addEventListener("pointerup", end);
+  splitter.addEventListener("pointercancel", end);
+  splitter.addEventListener("dblclick", () => setSideWidth(SIDE_DEFAULT));
+  splitter.addEventListener("keydown", (event) => {
+    const current = parseFloat(main.style.getPropertyValue("--side-width")) || SIDE_DEFAULT;
+    const step = event.shiftKey ? 80 : 24;
+    if (event.key === "ArrowLeft") setSideWidth(current + step);
+    else if (event.key === "ArrowRight") setSideWidth(current - step);
+    else if (event.key === "Home") setSideWidth(SIDE_DEFAULT);
+    else return;
+    event.preventDefault();
+    event.stopPropagation(); // don't also step the simulation / switch tools
+  });
+  // Keep the saved width valid when the window gets smaller.
+  window.addEventListener("resize", () => setSideWidth(parseFloat(main.style.getPropertyValue("--side-width")) || SIDE_DEFAULT, { save: false }));
+  splitter.setAttribute("aria-valuemin", String(SIDE_MIN));
+}
+
 // ------------------------------------------------------------------ util
 
 function escapeHtml(text) {
@@ -366,6 +435,7 @@ function toast(message) {
 window.nexus = { app, map, editor, setMode: (m) => setMode(m) };
 
 initControls();
+initSplitter();
 loadLayoutList().then(() => {
   connect();
   if (location.hash === "#editor") setMode("editor");

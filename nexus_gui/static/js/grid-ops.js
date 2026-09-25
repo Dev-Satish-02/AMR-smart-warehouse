@@ -204,3 +204,52 @@ export function countCells(grid) {
   }
   return counts;
 }
+
+// ------------------------------------------------------------------ labels
+
+// Where to put a text label for a connected region of cells (e.g. a
+// human-only zone). The label goes on the region's longest straight strip
+// so it always sits on the region itself, even for rings or L-shapes whose
+// bounding-box centre is empty. Returns
+//   { cx, cy, length, thickness, horizontal }
+// with cx, cy in cell units (cell (x, y) spans [x, x+1] x [y, y+1]).
+export function labelPlacement(cells, maxThickness = 6) {
+  const set = new Set(cells.map(([x, y]) => key(x, y)));
+  const has = (x, y) => set.has(key(x, y));
+  let best = null;
+
+  const consider = (horizontal, a0, a1, b) => {
+    // Run along the major axis from a0..a1 at minor coordinate b.
+    const covers = (bb) => {
+      for (let a = a0; a <= a1; a++) if (!(horizontal ? has(a, bb) : has(bb, a))) return false;
+      return true;
+    };
+    let lo = b, hi = b;
+    while (hi - lo + 1 < maxThickness && covers(hi + 1)) hi++;
+    while (hi - lo + 1 < maxThickness && covers(lo - 1)) lo--;
+    const length = a1 - a0 + 1;
+    const thickness = hi - lo + 1;
+    const mid = (a0 + a1 + 1) / 2, across = (lo + hi + 1) / 2;
+    const candidate = { length, thickness, horizontal, cx: horizontal ? mid : across, cy: horizontal ? across : mid };
+    const better = !best
+      || length > best.length
+      || (length === best.length && thickness > best.thickness)
+      || (length === best.length && thickness === best.thickness && horizontal && !best.horizontal)
+      || (length === best.length && thickness === best.thickness && horizontal === best.horizontal && candidate.cy > best.cy);
+    if (better) best = candidate;
+  };
+
+  for (const [x, y] of cells) {
+    if (!has(x - 1, y)) {           // start of a horizontal run
+      let x1 = x;
+      while (has(x1 + 1, y)) x1++;
+      consider(true, x, x1, y);
+    }
+    if (!has(x, y - 1)) {           // start of a vertical run
+      let y1 = y;
+      while (has(x, y1 + 1)) y1++;
+      consider(false, y, y1, x);
+    }
+  }
+  return best;
+}

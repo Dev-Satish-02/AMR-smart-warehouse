@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   blankGrid, gridFromRows, rowsFromGrid, lineCells, rectCells, roadCells,
-  paintCells, paintRoad, resizeLayout, countCells,
+  paintCells, paintRoad, resizeLayout, countCells, labelPlacement,
 } from "./nexus_gui/static/js/grid-ops.js";
 
 const rows = (grid) => rowsFromGrid(grid).join("\n");
@@ -110,4 +110,66 @@ test("resize keeps the bottom-left corner and drops stations outside", () => {
   assert.equal(rows(out.grid), ".\n+\n#");
   assert.deepEqual(out.stations.map((s) => s.id), ["B"]);
   assert.deepEqual(out.dropped, ["A"]);
+});
+
+// cells of every `ch` in a rows-picture (rows[0] is the top)
+const cellsOf = (rows, ch = "H") => {
+  const grid = gridFromRows(rows);
+  const out = [];
+  grid.forEach((row, y) => row.forEach((c, x) => { if (c === ch) out.push([x, y]); }));
+  return out;
+};
+const inside = (spot, cells) => cells.some(([x, y]) => spot.cx >= x && spot.cx <= x + 1 && spot.cy >= y && spot.cy <= y + 1);
+
+test("label for a ring-shaped zone sits on the ring, not in its empty middle", () => {
+  const ring = cellsOf([
+    "HHHHHHHHHH",
+    "H........H",
+    "H........H",
+    "H........H",
+    "HHHHHHHHHH",
+  ]);
+  const spot = labelPlacement(ring);
+  assert.equal(spot.horizontal, true);
+  assert.equal(spot.length, 10);
+  assert.deepEqual([spot.cx, spot.cy], [5, 4.5]); // centre of the top band
+  assert.ok(inside(spot, ring));
+});
+
+test("label for an L-shaped zone goes on its longest arm", () => {
+  const ell = cellsOf([
+    "H.....",
+    "H.....",
+    "H.....",
+    "H.....",
+    "H.....",
+    "H.....",
+    "HHHH..",
+  ]);
+  const spot = labelPlacement(ell);
+  assert.equal(spot.horizontal, false); // the 7-cell vertical arm beats the 4-cell foot
+  assert.equal(spot.length, 7);
+  assert.deepEqual([spot.cx, spot.cy], [0.5, 3.5]);
+});
+
+test("label for a solid block is centred and knows the block thickness", () => {
+  const block = cellsOf(["HHHHHH", "HHHHHH", "HHHHHH"]);
+  const spot = labelPlacement(block);
+  assert.deepEqual([spot.horizontal, spot.length, spot.thickness], [true, 6, 3]);
+  assert.deepEqual([spot.cx, spot.cy], [3, 1.5]);
+});
+
+test("a thick frame puts the label mid-band", () => {
+  const frame = cellsOf([
+    "HHHHHHHH",
+    "HHHHHHHH",
+    "HH....HH",
+    "HH....HH",
+    "HHHHHHHH",
+    "HHHHHHHH",
+  ]);
+  const spot = labelPlacement(frame);
+  assert.equal(spot.thickness, 2);
+  assert.equal(spot.cy, 5); // between the two top rows (y = 4 and 5)
+  assert.ok(inside(spot, frame));
 });
