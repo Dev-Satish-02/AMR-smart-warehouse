@@ -368,6 +368,10 @@ export class MapView {
   }
 
   _drawStations() {
+    // Skip a label that would overlap one already drawn (e.g. a row of
+    // parking bays); the station still shows its icon and tooltip in lists.
+    const boxes = [];
+    const overlaps = (b) => boxes.some((o) => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0);
     for (const s of this.layout.stations) {
       const r = this.cellRect(s.x, s.y, 0.08);
       const g = el("g", { class: `station station-${s.type}` }, this.gStations);
@@ -376,8 +380,13 @@ export class MapView {
       const [cx] = this.cellCenter(s.x, s.y);
       const above = s.y < this.layout.height - 1 && !this.isDrivable(s.x, s.y + 1);
       const ly = above ? r.y - 0.14 : r.y + r.height + 0.36;
+      const text = s.label || s.id;
+      const half = text.length * 0.3 * 0.29;
+      const box = { x0: cx - half, x1: cx + half, y0: ly - 0.3, y1: ly + 0.05 };
+      if (overlaps(box)) continue;
+      boxes.push(box);
       const label = el("text", { x: cx, y: ly, "font-size": 0.3, "font-weight": 600, fill: "var(--text-2)", "text-anchor": "middle", "paint-order": "stroke", stroke: "var(--floor)", "stroke-width": 0.12 }, this.gStationLabels);
-      label.textContent = s.label || s.id;
+      label.textContent = text;
     }
   }
 
@@ -458,6 +467,14 @@ export class MapView {
         node.ringKind = ring;
       }
       node.select.style.display = this.selected === r.id ? "" : "none";
+      if (r.battery !== null && r.battery !== undefined) {
+        const level = Math.max(0, Math.min(100, r.battery)) / 100;
+        node.battery.style.display = "";
+        node.batteryFill.setAttribute("width", (0.56 * level).toFixed(3));
+        node.batteryFill.setAttribute("fill", r.battery < 15 ? "var(--critical)" : r.battery < 30 ? "var(--warning)" : "var(--good)");
+      } else {
+        node.battery.style.display = "none";
+      }
 
       // keep the path glued to the robot between snapshots
       const p = this.pathNodes && this.pathNodes.get(r.id);
@@ -477,8 +494,12 @@ export class MapView {
     el("path", { d: "M0.4 -0.13 L0.56 0 L0.4 0.13 Z", fill: r.color, stroke: "#0b0c0e", "stroke-width": 0.03 }, body);
     const label = el("text", { y: 0.1, "font-size": 0.27, "font-weight": 800, fill: "#fff", "text-anchor": "middle" }, group);
     label.textContent = r.id;
+    // Battery gauge under dispatched robots.
+    const battery = el("g", { transform: "translate(-0.3 0.46)" }, group);
+    el("rect", { x: -0.02, y: -0.02, width: 0.64, height: 0.14, rx: 0.05, fill: "#0b0c0e", "fill-opacity": 0.85 }, battery);
+    const batteryFill = el("rect", { x: 0.02, y: 0.02, width: 0.56, height: 0.06, rx: 0.03 }, battery);
     group.addEventListener("click", (event) => { event.stopPropagation(); this.onSelect(r.id); });
-    const node = { group, body, ring, select, ringKind: null };
+    const node = { group, body, ring, select, battery, batteryFill, ringKind: null };
     this.robotNodes.set(r.id, node);
     return node;
   }

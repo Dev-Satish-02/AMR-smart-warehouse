@@ -51,7 +51,11 @@ const station = (id, type, label, x, y) => {
   doc.stations.push({ id, type, x, y, label });
   docs.connectStation(g, x, y);
 };
-const robot = (id, start, goal, extra = {}) => doc.robots.push({ id, start, goal, via: [], ...extra });
+const robot = (id, start, goal, extra = {}) => {
+  const r = { id, start, via: [], ...extra };
+  if (goal !== undefined) r.goal = goal;
+  doc.robots.push(r);
+};
 
 // ---------------------------------------------------------------- robot roads
 //
@@ -115,6 +119,8 @@ station("DD1", "unloading", "Dispatch Dock 1", 62, 8);
 station("DD2", "unloading", "Dispatch Dock 2", 62, 9);
 
 [16, 18, 20, 22].forEach((x, i) => station(`CH${i + 1}`, "charging", `Charger ${i + 1}`, x, 3));
+// AMR parking bays (dispatched robots' homes) next to the charging bay.
+for (let i = 0; i < 10; i++) station(`P${i + 1}`, "parking", `Parking ${i + 1}`, 26 + i, 3);
 
 // ---------------------------------------------------------------- walkways
 //
@@ -161,6 +167,7 @@ object("staging_area", "Dispatch Staging", 55, 6, 62, 12);
 
 // Service band (south)
 object("staging_area", "AMR Charging Bay", 14, 1, 24, 3);
+object("staging_area", "AMR Parking", 26, 1, 35, 3);
 object("forklift_parking", "Forklift Parking", 40, 1, 47, 3);
 object("machine", "Maintenance Workshop", 50, 1, 58, 3);
 
@@ -179,21 +186,37 @@ object("slow_zone", "ESD Feeder Road", 38, 19, 39, 29, { speed_limit: 0.5 });
 
 // ---------------------------------------------------------------- robots
 //
-// Fixed-route robots following the material flow (dispatched missions come
-// with the fleet dispatcher). Together they show every routing mode.
+// Nine dispatched AMRs take transport orders from the mission flows below
+// (battery levels vary so charging shows up early in a demo). Three
+// fixed-route robots show the other modes: a plain loop, a loop through a
+// via-point, and a one-shot trip.
 
-robot("R1", "RD1", "INS", { loop: true });                 // receiving -> inspection
-robot("R2", "RD2", "STA", { loop: true });                 // receiving -> stores
-robot("R3", "RD4", "STB", { loop: true, max_speed: 0.8 }); // slower AMR
-robot("R4", "STC", "KIN", { loop: true });                 // stores -> kitting
-robot("R5", "STD", "S2IN", { loop: true });                // stores -> SMT-2 (via ESD slow road)
-robot("R6", "KOUT", "S1IN", { loop: true, via: [[32, 30]] }); // kitting -> SMT-1 via the north side
-robot("R7", "S1OUT", "QCIN", { loop: true });              // SMT-1 -> QC
-robot("R8", "QCOUT", "PK1", { loop: true });               // QC -> packing
-robot("R9", "PK2", "DD1", { loop: true });                 // packing -> dispatch
-robot("R10", "FG", "DD2", { loop: true });                 // finished goods -> dispatch
-robot("R11", "RD3", "ASM", { loop: true });                // receiving -> assembly (crosswalks)
-robot("R12", "CH1", "QRN");                                // one-shot: charger -> quarantine
+const batteries = [100, 92, 85, 78, 70, 64, 55, 40, 33];
+batteries.forEach((battery, i) => robot(`R${i + 1}`, `P${i + 1}`, undefined, {
+  mode: "dispatch", home: `P${i + 1}`, battery,
+  ...(i === 4 ? { max_speed: 0.8 } : {}),   // R5: slower heavy-load AMR
+}));
+robot("R10", "FG", "DD2", { loop: true });                         // finished-goods shuttle
+robot("R11", "RD4", "ASM", { loop: true, via: [[32, 30]] });        // receiving -> assembly via the north side
+robot("R12", "CH4", "P10");                                         // one-shot: charger -> parking
+
+// ---------------------------------------------------------------- mission flows
+//
+// Transport orders along the material flow (orders per hour).
+
+const flows = [
+  // ~145 orders/hour: about 80% of what nine AMRs deliver here, so queues stay short.
+  ["Inbound receipt", ["RD1", "RD2", "RD3"], ["INS"], 20, "normal"],
+  ["Put-away to stores", ["INS"], ["STA", "STB", "STC", "STD"], 20, "normal"],
+  ["Kit picking", ["STA", "STB", "STC", "STD"], ["KIN"], 20, "normal"],
+  ["SMT line feeding", ["KOUT"], ["S1IN", "S2IN"], 22, "high"],
+  ["Assembly feeding", ["KOUT"], ["ASM"], 8, "normal"],
+  ["WIP to test", ["S1OUT", "S2OUT"], ["QCIN"], 18, "normal"],
+  ["QC release to packing", ["QCOUT"], ["PK1", "PK2"], 14, "normal"],
+  ["QC rejects to quarantine", ["QCOUT"], ["QRN"], 3, "low"],
+  ["Packed goods to store", ["PK1", "PK2"], ["FG"], 10, "low"],
+  ["Outbound dispatch", ["FG"], ["DD1"], 10, "normal"],
+].map(([name, from, to, rate, priority], i) => ({ id: `F${i + 1}`, name, from, to, rate, priority, enabled: true }));
 
 // ---------------------------------------------------------------- write
 
@@ -207,8 +230,10 @@ const layout = {
   stations: doc.stations,
   robots: doc.robots,
   objects: doc.objects,
-  simulation: { max_time: 1800 },
+  flows,
+  fleet: { generator: true, seed: 42, charge_rate: 2.5 },
+  simulation: { max_time: 3600 },
 };
 const out = join(ROOT, "layouts", "bel_warehouse.json");
 writeFileSync(out, JSON.stringify(layout, null, 2) + "\n");
-console.log(`wrote ${out}: ${doc.objects.length} objects, ${doc.stations.length} stations, ${doc.robots.length} robots`);
+console.log(`wrote ${out}: ${doc.objects.length} objects, ${doc.stations.length} stations, ${doc.robots.length} robots, ${flows.length} flows`);

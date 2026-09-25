@@ -141,6 +141,14 @@ class Controller:
             elif cmd == "speed":
                 value = float(command.get("value", 1.0))
                 self.speed = min(SPEEDS, key=lambda s: abs(s - value))
+            elif cmd == "mission.create":
+                self.sim.fleet.create(str(command.get("pickup")), str(command.get("dropoff")),
+                                      str(command.get("priority", "normal")))
+            elif cmd == "mission.cancel":
+                self.sim.fleet.cancel(str(command.get("id")))
+            elif cmd == "fleet.generator":
+                self.sim.fleet.cfg["generator"] = bool(command.get("value"))
+                self.sim._event("system", f"Order generator {'on' if self.sim.fleet.cfg['generator'] else 'off'}")
             elif cmd == "load":
                 self.load(str(command.get("name")))
                 await self.broadcast(self.layout_message())
@@ -219,6 +227,42 @@ def api_layouts():
 def api_catalog():
     """Object types (racks, equipment, areas, safety zones) and station types."""
     return {**catalog(), "station_types": list(STATION_TYPES)}
+
+
+@app.post("/api/missions")
+async def api_create_mission(payload: Dict[str, Any]):
+    """Create a transport order in the running simulation (e.g. from a WMS/MES).
+    Body: {"pickup": station id, "dropoff": station id, "priority": "high|normal|low"}"""
+    if controller.sim is None:
+        raise HTTPException(409, "No layout loaded")
+    async with controller.lock:
+        try:
+            mission = controller.sim.fleet.create(str(payload.get("pickup")), str(payload.get("dropoff")),
+                                                  str(payload.get("priority", "normal")), name=payload.get("name"))
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+    await controller.broadcast_state()
+    return mission.to_dict()
+
+
+@app.delete("/api/missions/{mission_id}")
+async def api_cancel_mission(mission_id: str):
+    if controller.sim is None:
+        raise HTTPException(409, "No layout loaded")
+    async with controller.lock:
+        try:
+            mission = controller.sim.fleet.cancel(mission_id)
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+    await controller.broadcast_state()
+    return mission.to_dict()
+
+
+@app.get("/api/missions")
+def api_missions():
+    if controller.sim is None or not controller.sim.fleet.active:
+        return {"queued": [], "active": [], "recent": [], "metrics": {}}
+    return controller.sim.fleet.snapshot()
 
 
 @app.get("/api/layouts/{name}")

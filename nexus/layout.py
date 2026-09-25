@@ -70,7 +70,24 @@ CELL_TYPES = {
     "v": "lane",
 }
 
-STATION_TYPES = ("loading", "unloading", "workstation", "charging")
+STATION_TYPES = ("loading", "unloading", "workstation", "charging", "parking")
+
+ROBOT_MODES = ("fixed", "dispatch")
+PRIORITIES = ("high", "normal", "low")
+
+# Fleet / mission settings (per layout, editable in the GUI).
+DEFAULT_FLEET = {
+    "generator": True,       # create orders from the mission flows
+    "seed": 7,               # repeatable demos
+    "battery_low": 30.0,     # % : finish the current order, then charge
+    "battery_critical": 8.0, # % : abandon a pickup and charge now
+    "charge_target": 95.0,   # % : back to work
+    "charge_rate": 2.0,      # % per second on a charger (demo speed)
+    "drain_per_m": 0.1,      # % per metre driven
+    "drain_idle": 0.01,      # % per second while parked
+    "service_time": 3.0,     # s to load / unload at a station
+    "max_queue": 40,
+}
 
 # Categorical robot identity colours, fixed order, validated for CVD
 # separation and contrast on the dark map surface. Robots are always
@@ -114,6 +131,8 @@ class Layout:
         self.robots: List[Dict[str, Any]] = d["robots"]
         self.simulation: Dict[str, Any] = d["simulation"]
         self.objects: List[Dict[str, Any]] = d["objects"]
+        self.flows: List[Dict[str, Any]] = d["flows"]
+        self.fleet: Dict[str, Any] = d["fleet"]
 
         # Cells covered by blocking objects, and speed caps from safety zones.
         self.blocked: Dict[Cell, Dict[str, Any]] = {}
@@ -292,6 +311,16 @@ class Layout:
             start = self.resolve_cell(robot.get("start"))
             goal = self.resolve_cell(robot.get("goal"))
             ok = True
+            if robot["mode"] == "dispatch":
+                if start is None:
+                    add("error", f"{rid}: home is not set or unknown", rid)
+                elif not self.in_bounds(start) or not self.is_drivable(start):
+                    add("error", f"{rid}: home {list(start)} is not a lane or station", rid, [start] if self.in_bounds(start) else [])
+                elif start in starts:
+                    add("error", f"{rid}: shares its home with {starts[start]}", rid, [start])
+                else:
+                    starts[start] = rid
+                continue
             if start is None:
                 add("error", f"{rid}: start is not set or unknown", rid)
                 ok = False
@@ -317,8 +346,12 @@ class Layout:
             if ok:
                 routable.append((robot, start, goal))
 
+        self._validate_flows(add)
+
         goals: Dict[Cell, str] = {}
         for robot in self.robots:
+            if robot["mode"] == "dispatch":
+                continue
             goal = self.resolve_cell(robot.get("goal"))
             if goal is not None and goal in goals:
                 add("warning", f"{robot['id']}: shares its goal with {goals[goal]}; one will wait", robot["id"], [goal])
@@ -353,6 +386,52 @@ class Layout:
                     add("warning", f"{robot['id']}: can reach its goal but has no lane route back", robot["id"], [goal, start])
 
         return issues, routes
+
+    def _validate_flows(self, add):
+        dispatched = [r for r in self.robots if r["mode"] == "dispatch"]
+        chargers = [s for s in self.data["stations"] if s["type"] == "charging"]
+        if dispatched and not chargers:
+            add("warning", "Dispatched robots have no charging station to go to", "fleet")
+        if self.flows and not dispatched and any(f["enabled"] for f in self.flows):
+            add("warning", "Mission flows are defined but no robot is in Dispatched mode", "fleet")
+
+        reach: Dict[Cell, set] = {}
+        for flow in self.flows:
+            label = flow["name"] or flow["id"]
+            unknown = [ref for ref in flow["from"] + flow["to"] if ref not in self.stations]
+            if unknown:
+                add("error", f"Flow '{label}': unknown station(s) {', '.join(unknown)}", flow["id"])
+                continue
+            if not flow["from"] or not flow["to"]:
+                add("error", f"Flow '{label}' needs at least one source and one destination station", flow["id"])
+                continue
+            missing = []
+            for src in flow["from"]:
+                a = self.resolve_cell(src)
+                if a not in reach:
+                    reach[a] = self.reachable_from(a)
+                for dst in flow["to"]:
+                    if dst != src and self.resolve_cell(dst) not in reach[a]:
+                        missing.append(f"{src}→{dst}")
+            if missing:
+                add("warning", f"Flow '{label}': no lane route for {', '.join(missing[:4])}"
+                    + (" …" if len(missing) > 4 else ""), flow["id"])
+            if all(dst in flow["from"] for dst in flow["to"]) and len(set(flow["from"] + flow["to"])) == 1:
+                add("warning", f"Flow '{label}' starts and ends at the same station", flow["id"])
+
+    def reachable_from(self, start: Cell) -> set:
+        """Cells reachable over the lane graph from start (stations are ends only)."""
+        seen = {start}
+        frontier = [start]
+        while frontier:
+            cell = frontier.pop()
+            if cell != start and self.is_station(cell):
+                continue
+            for n in _neighbours(cell):
+                if n not in seen and self.move_allowed(cell, n):
+                    seen.add(n)
+                    frontier.append(n)
+        return seen
 
     def to_dict(self) -> Dict[str, Any]:
         return deepcopy(self.data)
@@ -419,8 +498,42 @@ def normalize(data: Dict[str, Any]) -> Dict[str, Any]:
             raise LayoutError(f"Duplicate robot id {robot['id']}")
         seen.add(robot["id"])
         robot["via"] = [[int(v[0]), int(v[1])] for v in robot.get("via", [])]
+        # Dispatched robots have a home (parking) and take orders; fixed-route
+        # robots drive start -> goal (optionally looping / via-points).
+        mode = robot.get("mode")
+        if mode not in ROBOT_MODES:
+            mode = "dispatch" if robot.get("home") is not None and robot.get("goal") is None else "fixed"
+        robot["mode"] = mode
+        if mode == "dispatch":
+            if robot.get("home") is None:
+                robot["home"] = robot.get("start")
+            robot["start"] = robot["home"]
+            robot["battery"] = max(0.0, min(100.0, float(robot.get("battery", 100.0))))
         robots.append(robot)
     d["robots"] = robots
+
+    flows = []
+    seen = set()
+    for index, flow in enumerate(d.get("flows") or []):
+        flow = dict(flow)
+        flow.setdefault("id", f"F{index + 1}")
+        if flow["id"] in seen:
+            raise LayoutError(f"Duplicate flow id {flow['id']}")
+        seen.add(flow["id"])
+        flow.setdefault("name", flow["id"])
+        for key in ("from", "to"):
+            refs = flow.get(key) or []
+            flow[key] = [refs] if isinstance(refs, str) else [str(r) for r in refs]
+        flow["rate"] = max(0.0, float(flow.get("rate", 10.0)))
+        if flow.get("priority") not in PRIORITIES:
+            flow["priority"] = "normal"
+        flow["enabled"] = bool(flow.get("enabled", True))
+        flows.append(flow)
+    d["flows"] = flows
+
+    fleet = dict(DEFAULT_FLEET)
+    fleet.update(d.get("fleet") or {})
+    d["fleet"] = fleet
 
     objects = []
     seen = set()

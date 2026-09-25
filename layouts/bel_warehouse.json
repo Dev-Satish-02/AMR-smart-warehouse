@@ -40,7 +40,7 @@
     "#.v^........v^W.^.W.v.W.^.W.v.Wv^....Wv^.W...........v^........#",
     "#.v^........v^..^...v...^...v..v^....Wv^.............v^........#",
     "#.++<<<<<<<<++<<+<<<+<<<+<<<+<<++<<<<<++<<<<<<<<<<<<<++........#",
-    "#.++>>>>>>>>++>>+>+>+>+>>>>>>>>++>>>>>++>>>>>>>>>>>>>++........#",
+    "#.++>>>>>>>>++>>+>+>+>+>>>++++++++++>>++>>>>>>>>>>>>>++........#",
     "#..............................................................#",
     "#..............................................................#",
     "#..............................................................#",
@@ -242,97 +242,176 @@
       "x": 22,
       "y": 3,
       "label": "Charger 4"
+    },
+    {
+      "id": "P1",
+      "type": "parking",
+      "x": 26,
+      "y": 3,
+      "label": "Parking 1"
+    },
+    {
+      "id": "P2",
+      "type": "parking",
+      "x": 27,
+      "y": 3,
+      "label": "Parking 2"
+    },
+    {
+      "id": "P3",
+      "type": "parking",
+      "x": 28,
+      "y": 3,
+      "label": "Parking 3"
+    },
+    {
+      "id": "P4",
+      "type": "parking",
+      "x": 29,
+      "y": 3,
+      "label": "Parking 4"
+    },
+    {
+      "id": "P5",
+      "type": "parking",
+      "x": 30,
+      "y": 3,
+      "label": "Parking 5"
+    },
+    {
+      "id": "P6",
+      "type": "parking",
+      "x": 31,
+      "y": 3,
+      "label": "Parking 6"
+    },
+    {
+      "id": "P7",
+      "type": "parking",
+      "x": 32,
+      "y": 3,
+      "label": "Parking 7"
+    },
+    {
+      "id": "P8",
+      "type": "parking",
+      "x": 33,
+      "y": 3,
+      "label": "Parking 8"
+    },
+    {
+      "id": "P9",
+      "type": "parking",
+      "x": 34,
+      "y": 3,
+      "label": "Parking 9"
+    },
+    {
+      "id": "P10",
+      "type": "parking",
+      "x": 35,
+      "y": 3,
+      "label": "Parking 10"
     }
   ],
   "robots": [
     {
       "id": "R1",
-      "start": "RD1",
-      "goal": "INS",
+      "start": "P1",
       "via": [],
-      "loop": true
+      "mode": "dispatch",
+      "home": "P1",
+      "battery": 100
     },
     {
       "id": "R2",
-      "start": "RD2",
-      "goal": "STA",
+      "start": "P2",
       "via": [],
-      "loop": true
+      "mode": "dispatch",
+      "home": "P2",
+      "battery": 92
     },
     {
       "id": "R3",
-      "start": "RD4",
-      "goal": "STB",
+      "start": "P3",
       "via": [],
-      "loop": true,
-      "max_speed": 0.8
+      "mode": "dispatch",
+      "home": "P3",
+      "battery": 85
     },
     {
       "id": "R4",
-      "start": "STC",
-      "goal": "KIN",
+      "start": "P4",
       "via": [],
-      "loop": true
+      "mode": "dispatch",
+      "home": "P4",
+      "battery": 78
     },
     {
       "id": "R5",
-      "start": "STD",
-      "goal": "S2IN",
+      "start": "P5",
       "via": [],
-      "loop": true
+      "mode": "dispatch",
+      "home": "P5",
+      "battery": 70,
+      "max_speed": 0.8
     },
     {
       "id": "R6",
-      "start": "KOUT",
-      "goal": "S1IN",
+      "start": "P6",
+      "via": [],
+      "mode": "dispatch",
+      "home": "P6",
+      "battery": 64
+    },
+    {
+      "id": "R7",
+      "start": "P7",
+      "via": [],
+      "mode": "dispatch",
+      "home": "P7",
+      "battery": 55
+    },
+    {
+      "id": "R8",
+      "start": "P8",
+      "via": [],
+      "mode": "dispatch",
+      "home": "P8",
+      "battery": 40
+    },
+    {
+      "id": "R9",
+      "start": "P9",
+      "via": [],
+      "mode": "dispatch",
+      "home": "P9",
+      "battery": 33
+    },
+    {
+      "id": "R10",
+      "start": "FG",
+      "via": [],
+      "loop": true,
+      "goal": "DD2"
+    },
+    {
+      "id": "R11",
+      "start": "RD4",
       "via": [
         [
           32,
           30
         ]
       ],
-      "loop": true
-    },
-    {
-      "id": "R7",
-      "start": "S1OUT",
-      "goal": "QCIN",
-      "via": [],
-      "loop": true
-    },
-    {
-      "id": "R8",
-      "start": "QCOUT",
-      "goal": "PK1",
-      "via": [],
-      "loop": true
-    },
-    {
-      "id": "R9",
-      "start": "PK2",
-      "goal": "DD1",
-      "via": [],
-      "loop": true
-    },
-    {
-      "id": "R10",
-      "start": "FG",
-      "goal": "DD2",
-      "via": [],
-      "loop": true
-    },
-    {
-      "id": "R11",
-      "start": "RD3",
-      "goal": "ASM",
-      "via": [],
-      "loop": true
+      "loop": true,
+      "goal": "ASM"
     },
     {
       "id": "R12",
-      "start": "CH1",
-      "goal": "QRN",
-      "via": []
+      "start": "CH4",
+      "via": [],
+      "goal": "P10"
     }
   ],
   "objects": [
@@ -707,6 +786,15 @@
     },
     {
       "id": "O42",
+      "type": "staging_area",
+      "name": "AMR Parking",
+      "x": 26,
+      "y": 1,
+      "w": 10,
+      "h": 3
+    },
+    {
+      "id": "O43",
       "type": "forklift_parking",
       "name": "Forklift Parking",
       "x": 40,
@@ -715,7 +803,7 @@
       "h": 3
     },
     {
-      "id": "O43",
+      "id": "O44",
       "type": "machine",
       "name": "Maintenance Workshop",
       "x": 50,
@@ -724,7 +812,7 @@
       "h": 3
     },
     {
-      "id": "O44",
+      "id": "O45",
       "type": "control_room",
       "name": "Fleet Control Room",
       "x": 2,
@@ -733,7 +821,7 @@
       "h": 3
     },
     {
-      "id": "O45",
+      "id": "O46",
       "type": "office",
       "name": "Production Office",
       "x": 11,
@@ -742,7 +830,7 @@
       "h": 3
     },
     {
-      "id": "O46",
+      "id": "O47",
       "type": "office",
       "name": "Training Room",
       "x": 29,
@@ -751,7 +839,7 @@
       "h": 3
     },
     {
-      "id": "O47",
+      "id": "O48",
       "type": "test_bay",
       "name": "Quality Lab",
       "x": 38,
@@ -760,7 +848,7 @@
       "h": 3
     },
     {
-      "id": "O48",
+      "id": "O49",
       "type": "office",
       "name": "Stores Office",
       "x": 49,
@@ -769,7 +857,7 @@
       "h": 3
     },
     {
-      "id": "O49",
+      "id": "O50",
       "type": "office",
       "name": "Security",
       "x": 57,
@@ -778,7 +866,7 @@
       "h": 3
     },
     {
-      "id": "O50",
+      "id": "O51",
       "type": "slow_zone",
       "name": "Receiving Apron",
       "x": 2,
@@ -788,7 +876,7 @@
       "speed_limit": 0.5
     },
     {
-      "id": "O51",
+      "id": "O52",
       "type": "slow_zone",
       "name": "ESD Feeder Road",
       "x": 38,
@@ -798,7 +886,156 @@
       "speed_limit": 0.5
     }
   ],
+  "flows": [
+    {
+      "id": "F1",
+      "name": "Inbound receipt",
+      "from": [
+        "RD1",
+        "RD2",
+        "RD3"
+      ],
+      "to": [
+        "INS"
+      ],
+      "rate": 20,
+      "priority": "normal",
+      "enabled": true
+    },
+    {
+      "id": "F2",
+      "name": "Put-away to stores",
+      "from": [
+        "INS"
+      ],
+      "to": [
+        "STA",
+        "STB",
+        "STC",
+        "STD"
+      ],
+      "rate": 20,
+      "priority": "normal",
+      "enabled": true
+    },
+    {
+      "id": "F3",
+      "name": "Kit picking",
+      "from": [
+        "STA",
+        "STB",
+        "STC",
+        "STD"
+      ],
+      "to": [
+        "KIN"
+      ],
+      "rate": 20,
+      "priority": "normal",
+      "enabled": true
+    },
+    {
+      "id": "F4",
+      "name": "SMT line feeding",
+      "from": [
+        "KOUT"
+      ],
+      "to": [
+        "S1IN",
+        "S2IN"
+      ],
+      "rate": 22,
+      "priority": "high",
+      "enabled": true
+    },
+    {
+      "id": "F5",
+      "name": "Assembly feeding",
+      "from": [
+        "KOUT"
+      ],
+      "to": [
+        "ASM"
+      ],
+      "rate": 8,
+      "priority": "normal",
+      "enabled": true
+    },
+    {
+      "id": "F6",
+      "name": "WIP to test",
+      "from": [
+        "S1OUT",
+        "S2OUT"
+      ],
+      "to": [
+        "QCIN"
+      ],
+      "rate": 18,
+      "priority": "normal",
+      "enabled": true
+    },
+    {
+      "id": "F7",
+      "name": "QC release to packing",
+      "from": [
+        "QCOUT"
+      ],
+      "to": [
+        "PK1",
+        "PK2"
+      ],
+      "rate": 14,
+      "priority": "normal",
+      "enabled": true
+    },
+    {
+      "id": "F8",
+      "name": "QC rejects to quarantine",
+      "from": [
+        "QCOUT"
+      ],
+      "to": [
+        "QRN"
+      ],
+      "rate": 3,
+      "priority": "low",
+      "enabled": true
+    },
+    {
+      "id": "F9",
+      "name": "Packed goods to store",
+      "from": [
+        "PK1",
+        "PK2"
+      ],
+      "to": [
+        "FG"
+      ],
+      "rate": 10,
+      "priority": "low",
+      "enabled": true
+    },
+    {
+      "id": "F10",
+      "name": "Outbound dispatch",
+      "from": [
+        "FG"
+      ],
+      "to": [
+        "DD1"
+      ],
+      "rate": 10,
+      "priority": "normal",
+      "enabled": true
+    }
+  ],
+  "fleet": {
+    "generator": true,
+    "seed": 42,
+    "charge_rate": 2.5
+  },
   "simulation": {
-    "max_time": 1800
+    "max_time": 3600
   }
 }

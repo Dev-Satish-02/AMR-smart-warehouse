@@ -8,6 +8,7 @@ import { gridFromRows, rowsFromGrid } from "./nexus_gui/static/js/grid-ops.js";
 import {
   nextId, stationAt, resolveRef, refAt, describeRef, connectStation, addStation, moveStation,
   removeStation, renameStation, addRobot, renameRobot, removeRobot, toggleVia,
+  addDispatchRobot, setRobotMode, setRobotRef, addFlow, removeFlow,
 } from "./nexus_gui/static/js/doc-ops.js";
 
 const doc = (rows) => ({ grid: gridFromRows(rows), stations: [], robots: [] });
@@ -100,4 +101,40 @@ test("via-points toggle in click order", () => {
   assert.equal(toggleVia(r, 7, 1), "added");
   assert.equal(toggleVia(r, 5, 3), "removed");
   assert.deepEqual(r.via, [[2, 3], [7, 1]]);
+});
+
+test("dispatched robots: home and start move together", () => {
+  const d = doc(["....", "...."]);
+  addStation(d, 0, 0, "parking");
+  addStation(d, 3, 0, "parking");
+  const r = addDispatchRobot(d, "P1");
+  assert.deepEqual([r.id, r.mode, r.home, r.start, r.battery], ["R1", "dispatch", "P1", "P1", 100]);
+  setRobotRef(r, "home", "P2");
+  assert.deepEqual([r.home, r.start], ["P2", "P2"]);
+});
+
+test("switching mode keeps the robot where it is", () => {
+  const d = doc(["....", "...."]);
+  const r = addRobot(d, [0, 0], [3, 0]);
+  r.loop = true;
+  r.via = [[1, 0]];
+  setRobotMode(r, "dispatch");
+  assert.deepEqual([r.mode, r.home, r.goal, r.loop, r.via], ["dispatch", [0, 0], undefined, undefined, []]);
+  setRobotMode(r, "fixed");
+  assert.deepEqual([r.mode, r.start, r.home, r.goal], ["fixed", [0, 0], undefined, null]);
+});
+
+test("flows: add, remove, and station renames reach them", () => {
+  const d = doc(["....", "...."]);
+  addStation(d, 0, 0, "loading");
+  addStation(d, 3, 0, "unloading");
+  const f = addFlow(d);
+  f.from = ["L1"];
+  f.to = ["U1"];
+  assert.deepEqual([f.id, f.rate, f.priority, f.enabled], ["F1", 20, "normal", true]);
+  renameStation(d, "L1", "DOCK_A");
+  assert.deepEqual(f.from, ["DOCK_A"]);
+  assert.equal(addFlow(d).id, "F2");
+  assert.equal(removeFlow(d, "F1"), true);
+  assert.deepEqual(d.flows.map((x) => x.id), ["F2"]);
 });

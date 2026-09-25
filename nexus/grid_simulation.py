@@ -28,11 +28,13 @@ import numpy as np
 
 from agents.robot_agent import RobotAgent
 from algorithms.cell_reservation import CellReservationTable
-from algorithms.conflict_detector import ConflictDetector, PredictedConflict
+from algorithms.conflict_detector import PredictedConflict
+from algorithms.fast_conflict_detector import FastConflictDetector
 from algorithms.lane_grid import LaneGrid
 from algorithms.negotiation import NegotiationManager
 from algorithms.planner import NEXUSPlanner
 from communication.p2p import P2PNetwork
+from nexus.fleet import FleetManager
 from nexus.grid_world import GridWorld
 from nexus.layout import Cell, Layout
 
@@ -88,7 +90,9 @@ class GridSimulation:
 
         self.grid = LaneGrid(layout, turn_penalty=float(sim["turn_penalty"]))
         self.planner = NEXUSPlanner(grid=self.grid)
-        self.detector = ConflictDetector(
+        # Same results as NEXUS's ConflictDetector, computed faster (see
+        # algorithms/fast_conflict_detector.py).
+        self.detector = FastConflictDetector(
             prediction_horizon=3.0,
             prediction_dt=0.2,
             # Adjacent lanes are one cell apart; only same-cell encounters conflict.
@@ -130,8 +134,11 @@ class GridSimulation:
 
         if not self.errors:
             self._create_agents()
+        self.fleet = FleetManager(self)
 
-        self._event("system", f"Layout '{layout.name}' loaded: {len(self.agents)} robots")
+        dispatched = len(self.fleet.robots)
+        self._event("system", f"Layout '{layout.name}' loaded: {len(self.agents)} robots"
+                    + (f" ({dispatched} dispatched)" if dispatched else ""))
         for message in self.errors:
             self._event("error", message)
         if self.errors:
@@ -141,8 +148,10 @@ class GridSimulation:
         layout = self.layout
         for index, config in enumerate(layout.robots):
             robot_id = str(config["id"])
+            dispatched = config["mode"] == "dispatch"
             start_cell = layout.resolve_cell(config["start"])
-            goal_cell = layout.resolve_cell(config["goal"])
+            # Dispatched robots wait at home until the fleet manager sends them.
+            goal_cell = start_cell if dispatched else layout.resolve_cell(config["goal"])
             start = np.array(layout.cell_center(start_cell))
             goal = np.array(layout.cell_center(goal_cell))
 
@@ -174,7 +183,19 @@ class GridSimulation:
                 "arrival_logged": False,
                 "reroute_flash": 0.0,
                 "error": None,
+                "mode": config["mode"],
+                "activity": "IDLE" if dispatched else "ROUTE",
+                "mission": None,
+                "battery": float(config.get("battery", 100.0)) if dispatched else None,
+                "needs_charge": False,
             }
+
+            if dispatched:
+                agent.set_path([start])
+                agent.advance_waypoint()
+                self.agents.append(agent)
+                self.network.register(agent)
+                continue
 
             try:
                 agent.plan_path(start=start, goal=goal)
@@ -249,6 +270,24 @@ class GridSimulation:
     def _parked(self, agent: RobotAgent) -> bool:
         return agent.intent in {"ARRIVED", "IDLE"} and agent.robot_id not in self.yielding
 
+    def command(self, agent: RobotAgent, cell: Cell) -> bool:
+        """Send a robot to a cell (used by the fleet manager). A robot that is
+        backing off picks the new goal up when it resumes."""
+        meta = self.meta[agent.robot_id]
+        goal = np.array(self.layout.cell_center(cell))
+        meta["goal_cell"] = cell
+        meta["dwell_until"] = None
+        agent.set_task(task_id=agent.state.task_id, goal=goal)
+        if agent.robot_id in self.yielding:
+            return True
+        path = agent.planner.plan(agent.state.position, goal)
+        if not path:
+            return False
+        self._install_path(agent, path)
+        if len(path) <= 1 or agent.waypoint_index >= len(agent.planned_path):
+            agent.intent = "ARRIVED"
+        return True
+
     def _install_path(self, agent: RobotAgent, path: List[np.ndarray]):
         self.meta[agent.robot_id]["arrival_logged"] = False
         agent.set_path(path)
@@ -276,6 +315,7 @@ class GridSimulation:
         # 2. Path progress, via-points, arrivals, loops -------------------
         for agent in self.agents:
             self._progress(agent, now)
+        self.fleet.update(now)
 
         # 3. Predictive conflicts -> negotiation -> reroute / stop --------
         self._release_conflicts(now)
@@ -303,12 +343,14 @@ class GridSimulation:
             if agent.planned_path:
                 agent.advance_waypoint()
 
+        self.fleet.after_motion(self.time_step)
         self._safety_check()
         for agent in self.agents:
             self._log_arrival(agent, self.world.time)
         self._update_status()
 
-        if self.agents and all(self.meta[a.robot_id]["status"] == "ARRIVED" for a in self.agents) \
+        if self.agents and not self.fleet.active \
+                and all(self.meta[a.robot_id]["status"] == "ARRIVED" for a in self.agents) \
                 and not any(self.meta[a.robot_id]["loop"] for a in self.agents):
             self.status = "COMPLETED"
             self._event("system", f"All robots arrived in {self.world.time:.1f}s")
@@ -329,7 +371,7 @@ class GridSimulation:
                 planner.next_via += 1
                 self._event("route", f"{agent.robot_id} passed via-point {planner.next_via}/{len(planner.via)}", agent.robot_id)
 
-        if agent.robot_id in self.yielding or agent.stopped:
+        if agent.robot_id in self.yielding or agent.stopped or meta["mode"] == "dispatch":
             return
 
         if agent.planned_path and agent.waypoint_index >= len(agent.planned_path) and agent.intent != "ARRIVED":
@@ -353,7 +395,7 @@ class GridSimulation:
 
     def _log_arrival(self, agent: RobotAgent, now: float):
         meta = self.meta[agent.robot_id]
-        if agent.robot_id in self.yielding or meta["arrival_logged"]:
+        if agent.robot_id in self.yielding or meta["arrival_logged"] or meta["mode"] == "dispatch":
             return
         if agent.intent == "ARRIVED" and self._cell(agent.state.position) == meta["goal_cell"]:
             meta["arrival_logged"] = True
@@ -711,8 +753,12 @@ class GridSimulation:
                 status = "BACKING_OFF" if agent.waypoint_index < len(agent.planned_path) else "YIELDING"
             elif agent.stopped:
                 status = "YIELDING"
-            elif meta["dwell_until"] is not None:
+            elif meta["dwell_until"] is not None or meta["activity"] in ("LOADING", "UNLOADING"):
                 status = "DOCKED"
+            elif meta["activity"] == "CHARGING":
+                status = "CHARGING"
+            elif meta["mode"] == "dispatch" and meta["activity"] == "IDLE":
+                status = "PARKED"
             elif agent.intent == "ARRIVED":
                 status = "ARRIVED"
             elif meta["blocked_by"] is not None and robot.speed < 1e-3 and not robot.turning:
@@ -783,6 +829,11 @@ class GridSimulation:
                 "distance": round(agent.robot.distance_travelled, 1),
                 "peers": len(agent.get_peer_states()),
                 "error": meta["error"],
+                "mode": meta["mode"],
+                "activity": meta["activity"],
+                "mission": meta["mission"],
+                "battery": None if meta["battery"] is None else round(meta["battery"], 1),
+                "home": list(meta["home_cell"]),
             })
         return {
             "time": round(self.world.time, 2),
@@ -800,6 +851,7 @@ class GridSimulation:
                 for pair, info in self.active_conflicts.items()
             ],
             "metrics": self.metrics(),
+            "fleet": self.fleet.snapshot() if self.fleet.active else None,
         }
 
     def run(self, max_steps: Optional[int] = None) -> Dict[str, Any]:

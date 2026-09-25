@@ -388,3 +388,67 @@ body.resizing .map { pointer-events: none; }
 .fields .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .fields .grid4 input { padding: 0 6px; }
 .fields .grid4 span { display: block; color: var(--muted); font-size: 10.5px; margin-bottom: 2px; }
+
+/* ------------------------------------------------------------------ missions (live) */
+
+.missions-card { flex: 1; }
+.card-actions { display: flex; align-items: center; gap: 10px; }
+.switch { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; cursor: pointer; }
+.mission-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 0 12px 8px; }
+.mission-kpis div { background: var(--panel-2); border-radius: 8px; padding: 6px 8px; }
+.mission-kpis b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+.mission-kpis span { color: var(--muted); font-size: 10.5px; }
+.missions { list-style: none; margin: 0; padding: 0 8px 8px; overflow-y: auto; font-size: 12.5px; }
+.mission { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px; border-radius: 7px; }
+.mission:hover { background: var(--panel-2); }
+.mission .mid { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.mission .mname { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mission .msub { color: var(--muted); font-size: 11px; margin-top: 2px; display: flex; gap: 8px; align-items: center; }
+.mission .robot-badge { width: 18px; height: 18px; font-size: 8px; }
+.prio { font-size: 10px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 6px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-2); }
+.prio.high { color: var(--serious); border-color: currentColor; }
+.prio.low { color: var(--muted); }
+.mission .cancel { border: 0; background: transparent; color: var(--muted); cursor: pointer; width: 22px; height: 22px; border-radius: 50%; font-size: 14px; }
+.mission .cancel:hover { background: rgba(208, 59, 59, 0.2); color: var(--critical); }
+.mission-group { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; padding: 8px 6px 2px; }
+.battery { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
+.battery svg { width: 14px; height: 14px; }
+.battery.low { color: var(--warning); }
+.battery.critical { color: var(--critical); }
+.dlg-body select { height: 34px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0 8px; font: inherit; width: 100%; }
+
+/* ------------------------------------------------------------------ editor: missions pane */
+
+.subtabs { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+.subtab { border: 0; background: transparent; color: var(--text-2); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.subtab.active { background: var(--panel-3); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.ed-pane { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.ed-missions { overflow-y: auto; padding: 0 14px 14px; font-size: 12.5px; }
+.ed-missions h4 { margin: 12px 0 8px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; display: flex; justify-content: space-between; align-items: center; }
+.fleet-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.fleet-settings label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 11px; }
+.fleet-settings input[type="number"] { height: 28px; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text); padding: 0 8px; font: inherit; font-size: 12.5px; }
+.fleet-settings .check { flex-direction: row; align-items: center; gap: 8px; color: var(--text-2); font-size: 12.5px; grid-column: 1 / -1; }
+.flow { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 8px; background: var(--panel-2); }
+.flow.off { opacity: 0.55; }
+.flow-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.flow-head input[type="text"] { height: 28px; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text); padding: 0 8px; font: inherit; font-size: 12.5px; font-weight: 600; min-width: 0; }
+.flow-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.flow-row > span { color: var(--muted); width: 36px; font-size: 11px; }
+.flow-row select, .flow-row input[type="number"] { height: 26px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: 6px; font: inherit; font-size: 12px; padding: 0 6px; }
+.flow-row input[type="number"] { width: 64px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+.chip { display: inline-flex; align-items: center; gap: 2px; background: var(--panel-3); border: 1px solid var(--border-strong); border-radius: 999px; padding: 1px 3px 1px 8px; font-size: 11.5px; }
+.chip button { border: 0; background: transparent; color: var(--muted); cursor: pointer; width: 16px; height: 16px; border-radius: 50%; line-height: 1; }
+.chip button:hover { color: var(--critical); }
+.flow .icon-del { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.flow .icon-del:hover { color: var(--critical); }
+.flow .icon-del svg { width: 16px; height: 16px; }
+
+/* Side panel: scroll as a whole so every card keeps a usable height. */
+.side[data-view="live"] { overflow-y: auto; padding-right: 2px; }
+.side[data-view="live"] .fleet-card { flex: 1 0 250px; }
+.side[data-view="live"] .missions-card { flex: 1 0 270px; }
+.side[data-view="live"] .events-card { flex: 1 0 200px; }
+.kpi { padding: 10px 12px; }
+.kpi-value { font-size: 22px; margin-top: 4px; }

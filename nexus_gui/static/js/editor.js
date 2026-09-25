@@ -68,6 +68,7 @@ export class Editor {
     this.lanes = 2;
     this.stationType = "loading";
     this.objectType = "rack";
+    this.pane = "robots";
     this.lastDir = [1, 0];
     this.stroke = null;
     this.drag = null;
@@ -104,6 +105,8 @@ export class Editor {
       stations: structuredClone(layout.stations || []),
       robots: structuredClone(layout.robots || []).map((r) => ({ ...r, via: r.via || [] })),
       objects: structuredClone(layout.objects || []),
+      flows: structuredClone(layout.flows || []),
+      fleet: structuredClone(layout.fleet || {}),
       simulation: structuredClone(layout.simulation || {}),
     };
     this.file = file;
@@ -131,6 +134,8 @@ export class Editor {
       stations: d.stations,
       robots: d.robots,
       objects: d.objects,
+      flows: d.flows,
+      fleet: d.fleet,
       simulation: d.simulation,
     };
   }
@@ -165,7 +170,10 @@ export class Editor {
   // ================================================================ undo
 
   snapshot() {
-    return JSON.stringify({ grid: this.doc.grid, stations: this.doc.stations, robots: this.doc.robots, objects: this.doc.objects, name: this.doc.name });
+    return JSON.stringify({
+      grid: this.doc.grid, stations: this.doc.stations, robots: this.doc.robots, objects: this.doc.objects,
+      flows: this.doc.flows, fleet: this.doc.fleet, name: this.doc.name,
+    });
   }
 
   restore(snap) {
@@ -247,6 +255,7 @@ export class Editor {
     this._drawHighlight();
     this._drawSelection();
     this._renderFleet();
+    this._renderMissionsPane();
   }
 
   _cellRect(x, y, inset = 0) {
@@ -350,15 +359,18 @@ export class Editor {
     const list = $("#ed-robot-list");
     const selected = this.selectedRobot();
     if (!this.doc.robots.length) {
-      list.innerHTML = `<div class="ed-empty">No robots yet. Use <b>+ Add robot</b>, then click a start and a goal on the map.</div>`;
+      list.innerHTML = `<div class="ed-empty">No robots yet. Use <b>+ Add robot</b>: a dispatched robot needs a home, a fixed-route robot a start and a goal.</div>`;
     } else {
       list.innerHTML = this.doc.robots.map((r) => {
         const route = this.routes[r.id];
         const unreachable = route && route.outbound === null;
+        const text = r.mode === "dispatch"
+          ? `Dispatched<span class="arrow">·</span>home ${escapeHtml(docs.describeRef(this.doc, r.home ?? r.start))}`
+          : `${escapeHtml(docs.describeRef(this.doc, r.start))}<span class="arrow">→</span>${escapeHtml(docs.describeRef(this.doc, r.goal))}`;
         return `
           <div class="ed-robot${r === selected ? " selected" : ""}" data-robot="${escapeHtml(r.id)}">
             <div class="robot-badge" style="background:${this.robotColor(r)}">${escapeHtml(r.id)}</div>
-            <div class="route">${escapeHtml(docs.describeRef(this.doc, r.start))}<span class="arrow">→</span>${escapeHtml(docs.describeRef(this.doc, r.goal))}</div>
+            <div class="route">${text}</div>
             <div class="tags">
               ${r.via?.length ? `<span title="via-points">${r.via.length} via</span>` : ""}
               ${r.loop ? `<svg title="loops"><use href="#i-loop"/></svg>` : ""}
@@ -386,6 +398,23 @@ export class Editor {
     const robot = this.selectedRobot();
     const station = this.selectedStation();
 
+    if (robot && robot.mode === "dispatch") {
+      box.innerHTML = `
+        <h3><span class="robot-badge" style="background:${this.robotColor(robot)}">${escapeHtml(robot.id)}</span>Robot <span class="muted">${escapeHtml(robot.id)} · dispatched</span></h3>
+        <div class="fields">
+          <label>ID</label><input type="text" data-field="robot-id" value="${escapeHtml(robot.id)}" />
+          <label>Mode</label><select data-field="mode"><option value="dispatch" selected>Dispatched (takes orders)</option><option value="fixed">Fixed route</option></select>
+          <label>Home</label><div class="pair"><select data-field="home">${this._stationOptions(robot.home ?? robot.start)}</select><button class="btn small" data-pick="home" title="Pick on map"><svg><use href="#i-target"/></svg></button></div>
+          <label>Battery</label><div class="pair"><input type="number" data-field="battery" min="0" max="100" step="5" value="${robot.battery ?? 100}" /><span class="muted">% at start</span></div>
+          <label>Max speed</label><div class="pair"><input type="number" data-field="max_speed" min="0.1" max="1" step="0.1" value="${robot.max_speed ?? 1}" /><span class="muted">m/s</span></div>
+        </div>
+        <div class="route-stats">Parks at home and takes transport orders from the <b>Missions</b> tab flows. Charges automatically below the battery threshold.</div>
+        <div class="inspect-actions">
+          <button class="btn small danger" data-action="delete-robot"><svg><use href="#i-trash"/></svg>Delete</button>
+        </div>`;
+      return;
+    }
+
     if (robot) {
       const route = this.routes[robot.id];
       let stats = "";
@@ -402,6 +431,7 @@ export class Editor {
         <h3><span class="robot-badge" style="background:${this.robotColor(robot)}">${escapeHtml(robot.id)}</span>Robot <span class="muted">${escapeHtml(robot.id)}</span></h3>
         <div class="fields">
           <label>ID</label><input type="text" data-field="robot-id" value="${escapeHtml(robot.id)}" />
+          <label>Mode</label><select data-field="mode"><option value="dispatch">Dispatched (takes orders)</option><option value="fixed" selected>Fixed route</option></select>
           <label>Start</label><div class="pair"><select data-field="start">${this._stationOptions(robot.start)}</select><button class="btn small" data-pick="start" title="Pick on map"><svg><use href="#i-target"/></svg></button></div>
           <label>Goal</label><div class="pair"><select data-field="goal">${this._stationOptions(robot.goal)}</select><button class="btn small" data-pick="goal" title="Pick on map"><svg><use href="#i-target"/></svg></button></div>
           <label>Max speed</label><div class="pair"><input type="number" data-field="max_speed" min="0.1" max="1" step="0.1" value="${robot.max_speed ?? 1}" /><span class="muted">m/s</span></div>
@@ -492,11 +522,17 @@ export class Editor {
         }
         this.selection = { kind: "robot", id: robot.id };
         this.commit(before);
-      } else if (field === "start" || field === "goal") {
+      } else if (field === "start" || field === "goal" || field === "home") {
         if (!value) return;
         this.change(() => {
-          robot[field] = value.startsWith("s:") ? value.slice(2) : value.slice(2).split(",").map(Number);
+          docs.setRobotRef(robot, field, value.startsWith("s:") ? value.slice(2) : value.slice(2).split(",").map(Number));
         });
+      } else if (field === "mode") {
+        this.change(() => docs.setRobotMode(robot, value));
+        if (value === "fixed") this.toast(`Pick a goal for ${robot.id}`);
+      } else if (field === "battery") {
+        const battery = Math.min(100, Math.max(0, Number(value) || 100));
+        this.change(() => { robot.battery = battery; });
       } else if (field === "max_speed") {
         const speed = Math.min(1, Math.max(0.1, Number(value) || 1));
         this.change(() => { robot.max_speed = speed; });
@@ -634,8 +670,8 @@ export class Editor {
 
   startPick(pick) {
     if (!this.loaded) return;
-    this.pick = { stage: pick.kind === "add" ? "start" : pick.field, ...pick };
-    const what = this.pick.stage === "start" ? "START" : "GOAL";
+    this.pick = { stage: pick.kind === "add" ? (pick.mode === "dispatch" ? "home" : "start") : pick.field, ...pick };
+    const what = this.pick.stage.toUpperCase();
     const who = pick.kind === "add" ? "the new robot" : pick.robotId;
     this._setHint(`Click the ${what} for ${who}: a station or any lane cell · Esc to cancel`, true);
   }
@@ -649,6 +685,13 @@ export class Editor {
   _handlePick(cell) {
     const ref = docs.refAt(this.doc, cell[0], cell[1]);
     if (this.pick.kind === "add") {
+      if (this.pick.stage === "home") {
+        this.pick = null;
+        const robot = this.change(() => docs.addDispatchRobot(this.doc, ref));
+        this.setTool("select");
+        this.select({ kind: "robot", id: robot.id });
+        return;
+      }
       if (this.pick.stage === "start") {
         this.pick.start = ref;
         this.pick.stage = "goal";
@@ -665,7 +708,7 @@ export class Editor {
     const robot = this.doc.robots.find((r) => r.id === this.pick.robotId);
     const field = this.pick.field;
     this.cancelPick();
-    if (robot) this.change(() => { robot[field] = ref; });
+    if (robot) this.change(() => docs.setRobotRef(robot, field, ref));
   }
 
   // ---------------------------------------------------------------- hit testing
@@ -771,7 +814,7 @@ export class Editor {
         robot.via[d.index] = [cell[0], cell[1]];
       } else {
         if (!ops.isLane(ch) && !isStation) return;
-        robot[d.what] = docs.refAt(this.doc, cell[0], cell[1]);
+        docs.setRobotRef(robot, d.what, docs.refAt(this.doc, cell[0], cell[1]));
       }
     }
     if (!ok) return;
@@ -1030,6 +1073,7 @@ export class Editor {
   showIssue(index) {
     const issue = this.issues[index];
     if (!issue) return;
+    if (issue.target === "fleet" || (this.doc.flows || []).some((f) => f.id === issue.target)) this.setPane("missions");
     if (this.doc.robots.some((r) => r.id === issue.target)) this.select({ kind: "robot", id: issue.target });
     else if (this.doc.stations.some((s) => s.id === issue.target)) this.select({ kind: "station", id: issue.target });
     if (!issue.cells.length) return;
@@ -1075,6 +1119,96 @@ export class Editor {
     if (event.code === "Space" && this.spaceHeld) { this.spaceHeld = false; this._updatePanMode(); }
   }
 
+  // ================================================================ missions pane
+
+  setPane(pane) {
+    this.pane = pane;
+    for (const tab of document.querySelectorAll(".subtab")) tab.classList.toggle("active", tab.dataset.pane === pane);
+    for (const node of document.querySelectorAll(".ed-pane")) node.hidden = node.dataset.pane !== pane;
+    $("#ed-add-robot").hidden = pane !== "robots";
+    $("#ed-add-flow").hidden = pane !== "missions";
+  }
+
+  _renderMissionsPane() {
+    const box = $("#ed-missions");
+    if (!box || !this.loaded) return;
+    const fleet = { generator: true, battery_low: 30, charge_target: 95, charge_rate: 2, drain_per_m: 0.1, service_time: 3, seed: 7, ...this.doc.fleet };
+    const flows = this.doc.flows || [];
+    const dispatched = this.doc.robots.filter((r) => r.mode === "dispatch").length;
+    const label = (id) => {
+      const st = this.doc.stations.find((s) => s.id === id);
+      return st ? (st.label || st.id) : `${id} (missing)`;
+    };
+    const stationOptions = this.doc.stations
+      .filter((s) => !["parking", "charging"].includes(s.type))
+      .map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label || s.id)}</option>`).join("");
+    const chips = (flow, key) => flow[key].map((id) =>
+      `<span class="chip">${escapeHtml(label(id))}<button data-remove="${escapeHtml(flow.id)}|${key}|${escapeHtml(id)}" title="Remove">×</button></span>`).join("");
+    const num = (field, value, attrs) => `<input type="number" data-fleet="${field}" value="${value}" ${attrs} />`;
+    box.innerHTML = `
+      <h4>Fleet settings <span>${dispatched} dispatched robot${dispatched === 1 ? "" : "s"}</span></h4>
+      <div class="fleet-settings">
+        <label class="check"><input type="checkbox" data-fleet="generator" ${fleet.generator ? "checked" : ""} /> Create orders automatically from the flows</label>
+        <label>Charge below (%)${num("battery_low", fleet.battery_low, 'min="5" max="90" step="5"')}</label>
+        <label>Charge to (%)${num("charge_target", fleet.charge_target, 'min="30" max="100" step="5"')}</label>
+        <label>Charge rate (%/s)${num("charge_rate", fleet.charge_rate, 'min="0.1" max="20" step="0.5"')}</label>
+        <label>Drain (%/m)${num("drain_per_m", fleet.drain_per_m, 'min="0" max="2" step="0.05"')}</label>
+        <label>Load / unload (s)${num("service_time", fleet.service_time, 'min="0" max="60" step="1"')}</label>
+        <label>Random seed${num("seed", fleet.seed, 'min="0" step="1"')}</label>
+      </div>
+      <h4>Mission flows <span>${flows.length}</span></h4>
+      ${flows.length ? "" : `<div class="ed-empty">No flows yet. A flow creates transport orders from its source stations to its destination stations at a set rate. Use <b>+ Add flow</b>.</div>`}
+      ${flows.map((f) => `
+        <div class="flow${f.enabled ? "" : " off"}" data-flow="${escapeHtml(f.id)}">
+          <div class="flow-head">
+            <input type="checkbox" data-flow-field="enabled" ${f.enabled ? "checked" : ""} title="Enabled" />
+            <input type="text" data-flow-field="name" value="${escapeHtml(f.name)}" />
+            <button class="icon-del" data-delete-flow="${escapeHtml(f.id)}" title="Delete flow"><svg><use href="#i-trash"/></svg></button>
+          </div>
+          <div class="flow-row"><span>From</span><div class="chips">${chips(f, "from")}</div>
+            <select data-add="from"><option value="">+ station</option>${stationOptions}</select></div>
+          <div class="flow-row"><span>To</span><div class="chips">${chips(f, "to")}</div>
+            <select data-add="to"><option value="">+ station</option>${stationOptions}</select></div>
+          <div class="flow-row"><span>Rate</span><input type="number" data-flow-field="rate" min="0" max="600" step="5" value="${f.rate}" /> <span style="width:auto">orders / hour</span>
+            <select data-flow-field="priority">${["high", "normal", "low"].map((p) => `<option value="${p}" ${p === f.priority ? "selected" : ""}>${p[0].toUpperCase() + p.slice(1)} priority</option>`).join("")}</select></div>
+        </div>`).join("")}`;
+  }
+
+  _onMissionsChange(event) {
+    const t = event.target;
+    if (t.dataset.fleet) {
+      const key = t.dataset.fleet;
+      const value = t.type === "checkbox" ? t.checked : Number(t.value);
+      this.change(() => { this.doc.fleet = { ...this.doc.fleet, [key]: value }; });
+      return;
+    }
+    const flowId = t.closest("[data-flow]")?.dataset.flow;
+    const flow = (this.doc.flows || []).find((f) => f.id === flowId);
+    if (!flow) return;
+    if (t.dataset.add) {
+      if (!t.value || flow[t.dataset.add].includes(t.value)) { t.value = ""; return; }
+      this.change(() => flow[t.dataset.add].push(t.value));
+      return;
+    }
+    const field = t.dataset.flowField;
+    if (field === "enabled") this.change(() => { flow.enabled = t.checked; });
+    else if (field === "name") this.change(() => { flow.name = t.value.trim() || flow.id; });
+    else if (field === "rate") this.change(() => { flow.rate = Math.max(0, Number(t.value) || 0); });
+    else if (field === "priority") this.change(() => { flow.priority = t.value; });
+  }
+
+  _onMissionsClick(event) {
+    const remove = event.target.closest("[data-remove]");
+    if (remove) {
+      const [flowId, key, id] = remove.dataset.remove.split("|");
+      const flow = this.doc.flows.find((f) => f.id === flowId);
+      if (flow) this.change(() => { flow[key] = flow[key].filter((x) => x !== id); });
+      return;
+    }
+    const del = event.target.closest("[data-delete-flow]");
+    if (del) this.change(() => docs.removeFlow(this.doc, del.dataset.deleteFlow));
+  }
+
   // Fill the Object tool's type picker from the catalogue (after it loads).
   populateCatalog() {
     const select = $("#ed-object-type-select");
@@ -1113,10 +1247,33 @@ export class Editor {
       const item = event.target.closest(".ed-issue[data-index]");
       if (item) this.showIssue(Number(item.dataset.index));
     });
-    $("#ed-add-robot").addEventListener("click", () => {
+    $("#ed-add-robot").addEventListener("click", async () => {
       if (!this.loaded) return;
+      const form = await dialog({
+        title: "Add robot",
+        ok: "Next: pick on map",
+        body: `
+          <label>Mode
+            <select name="mode">
+              <option value="dispatch">Dispatched: parks at a home and takes transport orders</option>
+              <option value="fixed">Fixed route: drives start → goal (loop, via-points)</option>
+            </select>
+          </label>
+          <p class="note">Then click on the map: the home for a dispatched robot, or the start and goal for a fixed route.</p>`,
+      });
+      if (!form) return;
       this.setTool("select");
-      this.startPick({ kind: "add" });
+      this.startPick({ kind: "add", mode: form.get("mode") });
+    });
+    for (const tab of document.querySelectorAll(".subtab")) tab.addEventListener("click", () => this.setPane(tab.dataset.pane));
+    $("#ed-add-flow").addEventListener("click", () => {
+      const flow = this.change(() => docs.addFlow(this.doc));
+      this.toast(`Added ${flow.name}: choose its source and destination stations`);
+    });
+    $("#ed-missions").addEventListener("change", (event) => this._onMissionsChange(event));
+    $("#ed-missions").addEventListener("click", (event) => this._onMissionsClick(event));
+    $("#ed-missions").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && event.target.matches("input[type=text], input[type=number]")) event.target.blur();
     });
     $("#ed-robot-list").addEventListener("click", (event) => {
       const row = event.target.closest("[data-robot]");
@@ -1158,7 +1315,7 @@ export function dialog({ title, body, ok = "OK" }) {
     dlg.returnValue = "";
     dlg.addEventListener("close", onClose);
     dlg.showModal();
-    const first = dlg.querySelector("input");
+    const first = dlg.querySelector("#dlg-body input, #dlg-body select");
     if (first) { first.focus(); first.select?.(); }
   });
 }

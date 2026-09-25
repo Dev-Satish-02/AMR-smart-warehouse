@@ -25,6 +25,10 @@
       <symbol id="s-arrived" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="s-docked" viewBox="0 0 24 24"><path d="M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
       <symbol id="s-error" viewBox="0 0 24 24"><path d="M12 3 2 20h20zM12 10v4M12 17v.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="s-parked" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M10 17V7h3a3 3 0 0 1 0 6h-3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="s-charging" viewBox="0 0 24 24"><path d="M13.5 2.5 5 13.5h6l-1 8 8.5-11h-6z" fill="currentColor"/></symbol>
+      <symbol id="s-battery" viewBox="0 0 24 24"><rect x="2.5" y="7" width="17" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M21.5 10.5v3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+      <symbol id="s-mission" viewBox="0 0 24 24"><path d="M4 7l8-4 8 4v10l-8 4-8-4zM4 7l8 4 8-4M12 11v10" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
       <symbol id="s-idle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
       <!-- station icons -->
       <symbol id="st-loading" viewBox="0 0 24 24"><path d="M12 3v10M7.5 8.5 12 13l4.5-4.5M4 16v4h16v-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
@@ -70,6 +74,7 @@
       <symbol id="ob-slow_zone" viewBox="0 0 24 24"><path d="M3.5 17a8.5 8.5 0 1 1 17 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 17l-4-5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17" r="1.6" fill="currentColor"/></symbol>
       <symbol id="t-walkway" viewBox="0 0 24 24"><path d="M4 3v18M20 3v18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 3"/><circle cx="12" cy="7" r="2" fill="currentColor"/><path d="M9.5 20l1.2-5-1.7.6V12l3-1.5 3 1.5v3.6l-1.7-.6 1.2 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
       <symbol id="t-object" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10h6M7 14h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+      <symbol id="st-parking" viewBox="0 0 24 24"><path d="M8 20V4h5.5a5 5 0 0 1 0 10H8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.6" fill="currentColor"/><path d="M8 22l1.5-8L7 15V10.5L12 8.5l5 2V15l-2.5-1L16 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></symbol>
     </defs>
   </svg>
@@ -158,6 +163,20 @@
           <div class="fleet" id="fleet"></div>
         </section>
 
+        <section class="card missions-card" id="missions-card" hidden>
+          <div class="card-head">
+            <h2>Missions</h2>
+            <div class="card-actions">
+              <label class="switch" title="Create orders automatically from the layout's mission flows">
+                <input type="checkbox" id="gen-toggle" /> <span>Auto orders</span>
+              </label>
+              <button class="btn small" id="btn-new-order">+ New order</button>
+            </div>
+          </div>
+          <div class="mission-kpis" id="mission-kpis"></div>
+          <ol class="missions" id="missions"></ol>
+        </section>
+
         <section class="card events-card">
           <div class="card-head">
             <h2>Coordination log</h2>
@@ -210,6 +229,7 @@
                   <option value="unloading">Unloading</option>
                   <option value="workstation">Workstation</option>
                   <option value="charging">Charging</option>
+                  <option value="parking">Parking</option>
                 </select>
               </label>
               <div class="lanes-ctl" id="ed-lanes" title="Lanes per road ([ and ])">
@@ -254,11 +274,20 @@
 
         <section class="card ed-fleet-card">
           <div class="card-head">
-            <h2>Robots</h2>
-            <button class="btn small" id="ed-add-robot" title="Add a robot, then click its start and goal on the map">+ Add robot</button>
+            <div class="subtabs" role="tablist">
+              <button class="subtab active" data-pane="robots" role="tab">Robots</button>
+              <button class="subtab" data-pane="missions" role="tab">Missions</button>
+            </div>
+            <button class="btn small" id="ed-add-robot" title="Add a robot">+ Add robot</button>
+            <button class="btn small" id="ed-add-flow" title="Add a mission flow" hidden>+ Add flow</button>
           </div>
-          <div class="ed-robot-list" id="ed-robot-list"></div>
-          <div class="ed-inspect" id="ed-inspect"></div>
+          <div class="ed-pane" data-pane="robots">
+            <div class="ed-robot-list" id="ed-robot-list"></div>
+            <div class="ed-inspect" id="ed-inspect"></div>
+          </div>
+          <div class="ed-pane" data-pane="missions" hidden>
+            <div class="ed-missions" id="ed-missions"></div>
+          </div>
         </section>
 
         <section class="card ed-issues-card">

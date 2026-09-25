@@ -7,7 +7,8 @@ Checks that the demo layout is clean and realistic, and that it runs:
     * every rack face is reachable by a robot (lane) and by a person (walkway)
     * every place a walkway crosses a robot road is a marked crosswalk
     * contains the plant's areas, equipment, stations and safety zones
-    * 10 simulated minutes: robots stay on lanes, never touch, keep moving
+    * 10 simulated minutes: robots stay on lanes, never touch, keep moving;
+      dispatched AMRs deliver orders, recharge on their own, queue stays short
 
 Run:  python test_bel_layout.py
 """
@@ -35,10 +36,14 @@ def main():
 
     failures += check(layout.name == "BEL Warehouse (Prototype)", f"layout name is '{layout.name}'")
     failures += check(issues == [], f"no validation issues {[i['message'] for i in issues]}")
+    fixed = [r for r in layout.robots if r["mode"] == "fixed"]
+    dispatched = [r for r in layout.robots if r["mode"] == "dispatch"]
     unreachable = [rid for rid, r in routes.items() if r["outbound"] is None]
-    no_return = [r["id"] for r in layout.robots if r.get("loop") and routes[r["id"]]["back"] is None]
-    failures += check(not unreachable and not no_return and len(routes) == len(layout.robots),
-                      f"all {len(routes)} robot routes and return legs are reachable")
+    no_return = [r["id"] for r in fixed if r.get("loop") and routes[r["id"]]["back"] is None]
+    failures += check(not unreachable and not no_return and len(routes) == len(fixed),
+                      f"all {len(routes)} fixed-route robots have reachable routes and return legs")
+    failures += check(len(dispatched) >= 6 and len(layout.flows) >= 8,
+                      f"{len(dispatched)} dispatched AMRs and {len(layout.flows)} mission flows")
 
     # ---------------------------------------------------------- racks: robots + people
     racks = [o for o in layout.objects if o["type"] == "rack"]
@@ -88,14 +93,15 @@ def main():
               "inspection_area": 1, "quarantine_area": 1, "crosswalk": 4, "slow_zone": 1}
     missing = {t: n for t, n in needed.items() if types[t] < n}
     failures += check(not missing, f"plant equipment and areas present ({dict(types)})")
-    failures += check(all(stations[t] >= 1 for t in ("loading", "unloading", "workstation", "charging")),
+    failures += check(all(stations[t] >= 1 for t in ("loading", "unloading", "workstation", "charging", "parking")),
                       f"stations of every type ({dict(stations)})")
     names = [o["name"] for o in layout.objects]
     failures += check(len(names) == len(set(names)) and all(names), "every object has a unique name")
     failures += check(all(all(layout.in_bounds(c) for c in object_cells(o)) for o in layout.objects), "every object is inside the building")
     modes = {
+        "dispatched": bool(dispatched),
         "loop": any(r.get("loop") for r in layout.robots),
-        "one-shot": any(not r.get("loop") for r in layout.robots),
+        "one-shot": any(not r.get("loop") for r in fixed),
         "via-points": any(r.get("via") for r in layout.robots),
         "custom speed": any("max_speed" in r for r in layout.robots),
         "one-way": any(c in "<>^v" for row in layout.data["rows"] for c in row),
@@ -106,6 +112,7 @@ def main():
     sim = GridSimulation(layout)
     off_lane = illegal = 0
     previous, stalled, worst = {}, Counter(), 0.0
+    lowest = 100.0
     for _ in range(int(SIM_SECONDS / sim.time_step)):
         sim.step()
         for agent in sim.agents:
@@ -119,6 +126,8 @@ def main():
             status = sim.meta[agent.robot_id]["status"]
             stalled[agent.robot_id] = stalled[agent.robot_id] + sim.time_step if status in ("WAITING", "YIELDING") else 0.0
             worst = max(worst, stalled[agent.robot_id])
+            if sim.meta[agent.robot_id]["battery"] is not None:
+                lowest = min(lowest, sim.meta[agent.robot_id]["battery"])
         if sim.status != "RUNNING":
             break
     m = sim.metrics()
@@ -126,6 +135,11 @@ def main():
     failures += check(m["safety_violations"] == 0, f"no robot contact (min gap {m['min_separation']} m)")
     failures += check(m["trips_completed"] >= 20, f"steady material flow: {m['trips_completed']} trips in {SIM_SECONDS} s")
     failures += check(worst <= 60.0, f"no robot stuck for more than a minute (longest wait {worst:.1f} s)")
+    f = sim.fleet.metrics()
+    failures += check(f["completed"] >= 15, f"dispatched missions delivered: {f['completed']} ({f['per_hour']}/h)")
+    failures += check(f["charges"] >= 1 and lowest >= layout.fleet["battery_critical"],
+                      f"robots recharge on their own ({f['charges']} charges, lowest battery {lowest:.0f}%)")
+    failures += check(f["queued"] <= 15, f"order queue stays short ({f['queued']} waiting, avg wait {f['avg_wait']} s)")
     errors = [e["text"] for e in sim.events if e["kind"] == "error"]
     failures += check(not errors, f"no simulation errors {errors[:3]}")
 

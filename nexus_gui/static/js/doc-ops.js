@@ -7,9 +7,9 @@
 import { CHAR_DIR, LANE, SHELF, FLOOR, inBounds, clusterRects } from "./grid-ops.js";
 import { objectType } from "./catalog.js";
 
-export const STATION_TYPES = ["loading", "unloading", "workstation", "charging"];
-export const STATION_PREFIX = { loading: "L", unloading: "U", workstation: "W", charging: "C" };
-export const STATION_NAMES = { loading: "Dock", unloading: "Ship", workstation: "Pick", charging: "Charge" };
+export const STATION_TYPES = ["loading", "unloading", "workstation", "charging", "parking"];
+export const STATION_PREFIX = { loading: "L", unloading: "U", workstation: "W", charging: "C", parking: "P" };
+export const STATION_NAMES = { loading: "Dock", unloading: "Ship", workstation: "Pick", charging: "Charge", parking: "Parking" };
 
 // First free id of the form <prefix><n>.
 export function nextId(existing, prefix) {
@@ -97,6 +97,11 @@ export function renameStation(doc, oldId, newId) {
   for (const r of doc.robots) {
     if (r.start === oldId) r.start = newId;
     if (r.goal === oldId) r.goal = newId;
+    if (r.home === oldId) r.home = newId;
+  }
+  for (const f of doc.flows || []) {
+    f.from = f.from.map((ref) => (ref === oldId ? newId : ref));
+    f.to = f.to.map((ref) => (ref === oldId ? newId : ref));
   }
   return true;
 }
@@ -105,6 +110,58 @@ export function addRobot(doc, start, goal) {
   const robot = { id: nextId(doc.robots.map((r) => r.id), "R"), start, goal, via: [] };
   doc.robots.push(robot);
   return robot;
+}
+
+// A dispatched robot waits at its home (usually a parking station) and
+// takes orders from the mission flows.
+export function addDispatchRobot(doc, home) {
+  const robot = { id: nextId(doc.robots.map((r) => r.id), "R"), mode: "dispatch", home, start: home, via: [], battery: 100 };
+  doc.robots.push(robot);
+  return robot;
+}
+
+// Switch a robot between "fixed" (start -> goal route) and "dispatch".
+export function setRobotMode(robot, mode) {
+  if (mode === "dispatch") {
+    robot.mode = "dispatch";
+    robot.home = robot.start;
+    robot.battery = robot.battery ?? 100;
+    delete robot.goal;
+    delete robot.loop;
+    robot.via = [];
+  } else {
+    robot.mode = "fixed";
+    robot.start = robot.home ?? robot.start;
+    delete robot.home;
+    delete robot.battery;
+    robot.goal = robot.goal ?? null;
+  }
+  return robot;
+}
+
+// Home and start move together for dispatched robots.
+export function setRobotRef(robot, field, ref) {
+  if (robot.mode === "dispatch" && (field === "home" || field === "start")) {
+    robot.home = ref;
+    robot.start = ref;
+  } else {
+    robot[field] = ref;
+  }
+}
+
+// ================================================================== flows
+
+export function addFlow(doc) {
+  doc.flows = doc.flows || [];
+  const flow = { id: nextId(doc.flows.map((f) => f.id), "F"), name: `Flow ${doc.flows.length + 1}`, from: [], to: [], rate: 20, priority: "normal", enabled: true };
+  doc.flows.push(flow);
+  return flow;
+}
+
+export function removeFlow(doc, id) {
+  const before = (doc.flows || []).length;
+  doc.flows = (doc.flows || []).filter((f) => f.id !== id);
+  return doc.flows.length !== before;
 }
 
 export function renameRobot(doc, oldId, newId) {

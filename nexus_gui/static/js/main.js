@@ -1,5 +1,5 @@
 import { MapView } from "./map.js";
-import { Editor } from "./editor.js";
+import { Editor, dialog } from "./editor.js";
 import { loadCatalog, objectType } from "./catalog.js";
 
 const $ = (sel) => document.querySelector(sel);
@@ -18,12 +18,28 @@ const STATUS = {
   DOCKED: ["st-neutral", "s-docked", "Docked"],
   ARRIVED: ["st-neutral", "s-arrived", "Arrived"],
   IDLE: ["st-neutral", "s-idle", "Idle"],
+  PARKED: ["st-neutral", "s-parked", "Parked"],
+  CHARGING: ["st-good", "s-charging", "Charging"],
   ERROR: ["st-critical", "s-error", "Error"],
 };
+
+// What a dispatched robot is doing (shown with its motion status).
+const ACTIVITY = {
+  IDLE: "Parked at home",
+  RETURNING: "Returning home",
+  TO_PICKUP: "To pickup",
+  LOADING: "Loading",
+  TO_DROPOFF: "Delivering",
+  UNLOADING: "Unloading",
+  TO_CHARGER: "To charger",
+  CHARGING: "Charging",
+};
+const MISSION_PHASE = { assigned: "To pickup", loading: "Loading", to_dropoff: "Delivering", unloading: "Unloading" };
 
 const EVENT_ICON = {
   conflict: "s-yield", deadlock: "s-backoff", backoff: "s-backoff", reroute: "s-reroute",
   arrival: "s-arrived", resume: "s-moving", route: "s-turning", system: "s-idle", error: "s-error",
+  mission: "s-mission", battery: "s-charging",
 };
 
 const app = {
@@ -160,8 +176,9 @@ function onState(msg) {
   if (msg.events.length) addEvents(msg.events, !msg.reset_events);
   renderTransport();
   renderStatus(msg.state);
-  renderKpis(msg.state.metrics);
+  renderKpis(msg.state.metrics, msg.state.fleet);
   renderFleet(msg.state);
+  renderMissions(msg.state.fleet);
 }
 
 function interpolatedRobots(now) {
@@ -214,18 +231,27 @@ function kpi(label, value, sub = "", unit = "") {
   return `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}${unit ? `<small>${unit}</small>` : ""}</div><div class="kpi-sub">${sub}</div></div>`;
 }
 
-function renderKpis(m) {
+function renderKpis(m, fleet) {
   const safe = m.safety_violations === 0;
   const gap = m.min_separation !== null ? `min gap ${m.min_separation.toFixed(2)} m` : "no contact";
   const safety = `<span class="kpi-status" style="color:var(${safe ? "--good" : "--critical"})"><svg><use href="#${safe ? "s-arrived" : "s-error"}"/></svg>${safe ? "Safe" : "Contact"}</span> · ${gap}`;
+  const f = fleet?.metrics;
   $("#kpis").innerHTML = [
-    kpi("Trips completed", m.trips_completed, `${m.throughput_per_min.toFixed(1)} per minute`),
+    f ? kpi("Missions delivered", f.completed, `${f.per_hour.toFixed(0)} per hour · ${f.queued} queued`)
+      : kpi("Trips completed", m.trips_completed, `${m.throughput_per_min.toFixed(1)} per minute`),
     kpi("Fleet moving", `${m.moving}<small>/ ${m.robots}</small>`, `${m.waiting} waiting · ${m.arrived} at station`),
     kpi("Conflicts negotiated", m.negotiations, `${m.reroutes} reroutes`),
     kpi("Deadlocks resolved", m.deadlocks_resolved, `${m.backoffs} back-offs`),
     kpi("Safety violations", m.safety_violations, safety),
-    kpi("Distance driven", m.distance_m.toFixed(0), `${Math.round(m.utilisation * 100)}% fleet utilisation`, "m"),
+    f ? kpi("Fleet battery", f.avg_battery === null ? "—" : f.avg_battery.toFixed(0), `${f.charging} charging · ${f.charges} charges`, "%")
+      : kpi("Distance driven", m.distance_m.toFixed(0), `${Math.round(m.utilisation * 100)}% fleet utilisation`, "m"),
   ].join("");
+}
+
+function batteryBadge(value) {
+  if (value === null || value === undefined) return "";
+  const cls = value < 15 ? "critical" : value < 30 ? "low" : "";
+  return `<span class="battery ${cls}" title="Battery"><svg><use href="#s-battery"/></svg>${value.toFixed(0)}%</span>`;
 }
 
 function renderFleet(state) {
@@ -238,18 +264,82 @@ function renderFleet(state) {
     const total = Math.max(r.distance + pathLength(r.path), 0.001);
     const pct = ["ARRIVED", "DOCKED"].includes(r.status) ? 100 : Math.round((r.distance / total) * 100);
     const waitingOn = r.blocked_by && ["WAITING", "YIELDING", "BACKING_OFF"].includes(r.status) ? ` · for ${r.blocked_by}` : "";
+    const dispatched = r.mode === "dispatch";
+    const heading = dispatched
+      ? `${escapeHtml(r.mission ? r.mission : ACTIVITY[r.activity] || r.activity)}${r.mission || !["IDLE"].includes(r.activity) ? `<span class="arrow">→</span>${escapeHtml(stationName(r.goal))}` : ""}`
+      : `${escapeHtml(stationName(r.start))}<span class="arrow">→</span>${escapeHtml(stationName(r.goal))}`;
+    const eta = r.eta !== null && !["ARRIVED", "DOCKED", "PARKED", "CHARGING"].includes(r.status) ? r.eta.toFixed(0) + " s" : "—";
     return `
       <div class="robot-row${app.selected === r.id ? " selected" : ""}" data-id="${r.id}">
         <div class="robot-badge" style="background:${r.color}">${escapeHtml(r.id)}</div>
         <div class="robot-main">
-          <div class="robot-route">${escapeHtml(stationName(r.start))}<span class="arrow">→</span>${escapeHtml(stationName(r.goal))}</div>
-          <div class="robot-meta"><span>${r.speed.toFixed(2)} m/s</span><span>ETA ${r.eta !== null && !["ARRIVED", "DOCKED"].includes(r.status) ? r.eta.toFixed(0) + " s" : "—"}</span><span>${r.trips} trips</span>${r.via.length ? `<span>${r.via.length} via</span>` : ""}</div>
+          <div class="robot-route">${heading}</div>
+          <div class="robot-meta">${batteryBadge(r.battery)}<span>${r.speed.toFixed(2)} m/s</span><span>ETA ${eta}</span><span>${r.trips} ${dispatched ? "mission" : "trip"}${r.trips === 1 ? "" : "s"}</span>${dispatched && r.mission ? `<span>${ACTIVITY[r.activity] || ""}</span>` : ""}${r.via.length ? `<span>${r.via.length} via</span>` : ""}</div>
           <div class="progress"><span style="width:${pct}%;background:${r.color}"></span></div>
         </div>
         <span class="status-chip ${cls}" title="${escapeHtml(r.stop_reason || "")}"><svg><use href="#${icon}"/></svg>${label}${waitingOn}</span>
       </div>`;
   }).join("");
   fleet.innerHTML = html;
+}
+
+function renderMissions(fleet) {
+  const card = $("#missions-card");
+  card.hidden = !fleet;
+  if (!fleet) return;
+  $("#gen-toggle").checked = fleet.generator;
+  const m = fleet.metrics;
+  const tile = (value, label) => `<div><b>${value}</b><span>${label}</span></div>`;
+  $("#mission-kpis").innerHTML = [
+    tile(m.queued, "queued"),
+    tile(m.active, "in progress"),
+    tile(m.avg_wait === null ? "—" : `${m.avg_wait.toFixed(0)} s`, "wait for robot"),
+    tile(m.avg_lead_time === null ? "—" : `${m.avg_lead_time.toFixed(0)} s`, "lead time"),
+  ].join("");
+  const robotColor = new Map((app.latest?.robots || []).map((r) => [r.id, r.color]));
+  const row = (mission, extra) => `
+    <li class="mission">
+      <span class="mid">${mission.id}</span>
+      <div>
+        <div class="mname">${escapeHtml(mission.pickup_label)} → ${escapeHtml(mission.dropoff_label)}</div>
+        <div class="msub">${extra}</div>
+      </div>
+      ${mission.status === "queued" || mission.status === "assigned"
+        ? `<button class="cancel" data-cancel="${mission.id}" title="Cancel order">×</button>` : "<span></span>"}
+    </li>`;
+  const prio = (p) => `<span class="prio ${p}">${p}</span>`;
+  const parts = [];
+  if (fleet.active.length) {
+    parts.push(`<li class="mission-group">In progress</li>`);
+    for (const mission of fleet.active) {
+      parts.push(row(mission, `<span class="robot-badge" style="background:${robotColor.get(mission.robot) || "#555"}">${mission.robot}</span>${MISSION_PHASE[mission.status] || mission.status} ${prio(mission.priority)}`));
+    }
+  }
+  if (fleet.queued.length) {
+    parts.push(`<li class="mission-group">Queue</li>`);
+    const now = app.latest?.time || 0;
+    for (const mission of fleet.queued) parts.push(row(mission, `${prio(mission.priority)} waiting ${Math.max(0, now - mission.created).toFixed(0)} s`));
+  }
+  if (!parts.length) parts.push(`<li class="mission-group">No open orders</li>`);
+  $("#missions").innerHTML = parts.join("");
+}
+
+async function newOrder() {
+  const stations = app.layout.stations.filter((s) => !["parking", "charging"].includes(s.type));
+  const options = stations.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label || s.id)}</option>`).join("");
+  const form = await dialog({
+    title: "New transport order",
+    ok: "Create order",
+    body: `
+      <label>Pickup <select name="pickup">${options}</select></label>
+      <label>Drop-off <select name="dropoff">${options}</select></label>
+      <label>Priority
+        <select name="priority"><option value="high">High</option><option value="normal" selected>Normal</option><option value="low">Low</option></select>
+      </label>
+      <p class="note">The dispatcher assigns the nearest free robot with enough battery.</p>`,
+  });
+  if (!form) return;
+  send("mission.create", { pickup: form.get("pickup"), dropoff: form.get("dropoff"), priority: form.get("priority") });
 }
 
 function pathLength(path) {
@@ -296,7 +386,7 @@ function renderLegend() {
   if (families.has("production") || families.has("facility")) items.push(item(box("var(--production-fill)", "var(--production-stroke)"), "Equipment"));
   if (families.has("area")) items.push(item(box("var(--area-fill)", "var(--area-stroke)", 'stroke-dasharray="3 2"'), "Area"));
   if (chars.has("H")) items.push(item(`<svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="rgba(201,162,39,0.25)" stroke="rgba(201,162,39,0.7)"/></svg>`, "Human only"));
-  const stationNames = { loading: "Loading", unloading: "Unloading", workstation: "Workstation", charging: "Charging" };
+  const stationNames = { loading: "Loading", unloading: "Unloading", workstation: "Workstation", charging: "Charging", parking: "Parking" };
   for (const [type, label] of Object.entries(stationNames)) if (stations.has(type)) items.push(item(icon(`st-${type}`), label));
   items.push(item(`<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="var(--critical)" stroke-width="1.8"/><circle cx="8" cy="8" r="1.6" fill="var(--critical)"/></svg>`, "Predicted conflict"));
   $("#legend").innerHTML = items.join("");
@@ -336,6 +426,13 @@ function initControls() {
   // changes the hash (no reload), so follow it here.
   window.addEventListener("hashchange", () => setMode(location.hash === "#editor" ? "editor" : "live"));
   window.addEventListener("beforeunload", (event) => { if (editor.dirty) { event.preventDefault(); event.returnValue = ""; } });
+
+  $("#btn-new-order").addEventListener("click", () => newOrder());
+  $("#gen-toggle").addEventListener("change", (event) => send("fleet.generator", { value: event.target.checked }));
+  $("#missions").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-cancel]");
+    if (button) send("mission.cancel", { id: button.dataset.cancel });
+  });
 
   $("#fleet").addEventListener("click", (event) => {
     const row = event.target.closest(".robot-row");
