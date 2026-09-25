@@ -1,4 +1,5 @@
 import { MapView } from "./map.js";
+import { Editor } from "./editor.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -39,6 +40,14 @@ const app = {
 
 const map = new MapView($("#map"));
 map.onSelect = (id) => select(id === app.selected ? null : id);
+
+let mode = "live";
+const editor = new Editor({
+  toast,
+  onSaved: async (file) => { await loadLayoutList(); syncSelect(); },
+  onOpened: () => syncSelect(),
+  onRun: (file) => { setMode("live"); send("load", { name: file }); },
+});
 
 // ------------------------------------------------------------------ socket
 
@@ -84,7 +93,7 @@ function onLayout(msg) {
   $("#layout-meta").textContent =
     `${msg.layout.width} × ${msg.layout.height} m grid · ${lanes} lane cells · ` +
     `${msg.layout.stations.length} stations · ${msg.layout.robots.length} robots`;
-  $("#layout-select").value = msg.name;
+  syncSelect();
 
   const errors = msg.issues.filter((i) => i.severity === "error");
   const issues = $("#issues");
@@ -98,11 +107,41 @@ function onLayout(msg) {
 async function loadLayoutList() {
   const res = await fetch("/api/layouts");
   const data = await res.json();
+  editor.knownFiles = data.layouts.map((l) => l.name);
   const select = $("#layout-select");
   select.innerHTML = data.layouts
     .map((l) => `<option value="${l.name}">${escapeHtml(l.title)}</option>`)
-    .join("");
-  if (data.active) select.value = data.active;
+    .join("") + `<option value="" hidden>Unsaved layout</option>`;
+  if (!app.layoutName && data.active) app.layoutName = data.active;
+  syncSelect();
+}
+
+// The layout dropdown follows the current mode: in Live it picks what runs,
+// in the Editor it picks what you edit.
+function syncSelect() {
+  const select = $("#layout-select");
+  select.value = mode === "editor" ? (editor.file || "") : (app.layoutName || "");
+}
+
+// ------------------------------------------------------------------ modes
+
+async function setMode(next) {
+  if (next === mode) return;
+  mode = next;
+  history.replaceState(null, "", mode === "editor" ? "#editor" : "#live");
+  for (const node of document.querySelectorAll("[data-view]")) node.hidden = node.dataset.view !== mode;
+  for (const tab of document.querySelectorAll(".tab")) {
+    const active = tab.dataset.mode === mode;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", active);
+  }
+  if (mode === "editor") {
+    if (!editor.loaded && app.layoutName) await editor.open(app.layoutName);
+    else editor.map.fit();
+  } else {
+    map.fit();
+  }
+  syncSelect();
 }
 
 // ------------------------------------------------------------------ state
@@ -272,7 +311,18 @@ function initControls() {
     if (btn) send("speed", { value: Number(btn.dataset.speed) });
   });
 
-  $("#layout-select").addEventListener("change", (event) => send("load", { name: event.target.value }));
+  $("#layout-select").addEventListener("change", (event) => {
+    const name = event.target.value;
+    if (mode === "live") { send("load", { name }); return; }
+    if (editor.confirmDiscard()) editor.open(name);
+    else syncSelect();
+  });
+
+  for (const tab of document.querySelectorAll(".tab")) tab.addEventListener("click", () => setMode(tab.dataset.mode));
+  // Typing /#editor or /#live into the address bar of an open page only
+  // changes the hash (no reload), so follow it here.
+  window.addEventListener("hashchange", () => setMode(location.hash === "#editor" ? "editor" : "live"));
+  window.addEventListener("beforeunload", (event) => { if (editor.dirty) { event.preventDefault(); event.returnValue = ""; } });
 
   $("#fleet").addEventListener("click", (event) => {
     const row = event.target.closest(".robot-row");
@@ -284,7 +334,10 @@ function initControls() {
   document.addEventListener("click", (event) => { if (!event.target.closest(".layers-wrap")) pop.hidden = true; });
   pop.addEventListener("change", (event) => map.setLayer(event.target.dataset.layer, event.target.checked));
 
+  document.addEventListener("keyup", (event) => { if (mode === "editor") editor.onKeyUp(event); });
   document.addEventListener("keydown", (event) => {
+    if ($("#dlg").open) return;
+    if (mode === "editor") { editor.onKey(event); return; }
     if (event.target.closest("input, select, textarea")) return;
     if (event.code === "Space") { event.preventDefault(); send(app.running ? "pause" : "play"); }
     else if (event.code === "ArrowRight") send("step");
@@ -309,6 +362,12 @@ function toast(message) {
   toastTimer = setTimeout(() => { node.hidden = true; }, 4000);
 }
 
+// Debug handle for the browser console and end-to-end tests.
+window.nexus = { app, map, editor, setMode: (m) => setMode(m) };
+
 initControls();
-loadLayoutList().then(connect);
+loadLayoutList().then(() => {
+  connect();
+  if (location.hash === "#editor") setMode("editor");
+});
 requestAnimationFrame(frame);

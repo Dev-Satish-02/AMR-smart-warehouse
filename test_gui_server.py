@@ -26,8 +26,15 @@ def main():
 
     with TestClient(app) as client:
         failures += check(client.get("/").status_code == 200, "GET / serves the page")
-        for asset in ("/static/app.css", "/static/js/main.js", "/static/js/map.js"):
+        for asset in ("/static/app.css", "/static/js/main.js", "/static/js/map.js",
+                      "/static/js/editor.js", "/static/js/grid-ops.js"):
             failures += check(client.get(asset).status_code == 200, f"GET {asset}")
+        failures += check(client.get("/").headers.get("cache-control") == "no-cache"
+                          and client.get("/static/js/main.js").headers.get("cache-control") == "no-cache",
+                          "page and scripts are served with Cache-Control: no-cache (no stale GUI after updates)")
+        failures += check('data-mode="editor"' in client.get("/").text and "disabled" not in
+                          client.get("/").text.split('data-mode="editor"')[1].split(">")[0],
+                          "Editor tab is enabled")
 
         layouts = client.get("/api/layouts").json()
         names = [item["name"] for item in layouts["layouts"]]

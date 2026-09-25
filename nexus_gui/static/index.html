@@ -31,6 +31,18 @@
       <symbol id="st-unloading" viewBox="0 0 24 24"><path d="M12 13V3M7.5 7.5 12 3l4.5 4.5M4 16v4h16v-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="st-workstation" viewBox="0 0 24 24"><path d="M3.5 7.5 12 3.5l8.5 4v9l-8.5 4-8.5-4zM3.5 7.5 12 11.5l8.5-4M12 11.5v9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
       <symbol id="st-charging" viewBox="0 0 24 24"><path d="M13.5 2.5 5 13.5h6l-1 8 8.5-11h-6z" fill="currentColor"/></symbol>
+      <!-- editor tools -->
+      <symbol id="t-pan" viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10.5V4a1.5 1.5 0 0 1 3 0v6.5M14 10.5V5.5a1.5 1.5 0 0 1 3 0V12M17 9.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1a6.5 6.5 0 0 1-5.4-2.9L4 15.5a1.6 1.6 0 0 1 2.6-1.8L8 15.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="t-road" viewBox="0 0 24 24"><path d="M3 8h13M12 4l4 4-4 4M21 16H8M12 12l-4 4 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="t-lane" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="3" fill="currentColor"/></symbol>
+      <symbol id="t-shelf" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 9h16M4 15h16" stroke="currentColor" stroke-width="2"/></symbol>
+      <symbol id="t-wall" viewBox="0 0 24 24"><path d="M3 5h18v14H3zM3 12h18M9 5v7M15 12v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="t-human" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 21 21 7M3 13 13 3M13 21l8-8" stroke="currentColor" stroke-width="1.6"/></symbol>
+      <symbol id="t-erase" viewBox="0 0 24 24"><path d="M8.5 20H20M4.5 15.5l9-9a2 2 0 0 1 2.8 0l3.2 3.2a2 2 0 0 1 0 2.8L12 20H8.5l-4-4a2 2 0 0 1 0-2.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM7 3v6h8V3M7 21v-7h10v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="i-new" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M12 12v6M9 15h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></symbol>
       <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.6" fill="currentColor"/><path d="M8 22l1.5-8L7 15V10.5L12 8.5l5 2V15l-2.5-1L16 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></symbol>
     </defs>
   </svg>
@@ -49,7 +61,7 @@
 
       <nav class="tabs" role="tablist">
         <button class="tab active" data-mode="live" role="tab" aria-selected="true">Live</button>
-        <button class="tab" data-mode="editor" role="tab" aria-selected="false" disabled title="Layout editor — next milestone">Editor</button>
+        <button class="tab" data-mode="editor" role="tab" aria-selected="false">Editor</button>
       </nav>
 
       <div class="topbar-right">
@@ -62,7 +74,7 @@
     </header>
 
     <main class="main">
-      <section class="stage">
+      <section class="stage" data-view="live">
         <div class="stage-head">
           <div>
             <h1 id="layout-title">—</h1>
@@ -106,7 +118,7 @@
         </div>
       </section>
 
-      <aside class="side">
+      <aside class="side" data-view="live">
         <section class="kpis" id="kpis"></section>
 
         <section class="card fleet-card">
@@ -125,10 +137,100 @@
           <ol class="events" id="events"></ol>
         </section>
       </aside>
+
+      <!-- ============================================================ EDITOR -->
+      <section class="stage" data-view="editor" hidden>
+        <div class="stage-head">
+          <div class="ed-title">
+            <input id="ed-name" class="title-input" spellcheck="false" aria-label="Layout name" />
+            <div class="stage-meta"><span id="ed-file"></span><span class="dirty" id="ed-dirty" hidden>● Unsaved changes</span></div>
+          </div>
+          <div class="ed-actions">
+            <button class="btn" id="ed-new"><svg><use href="#i-new"/></svg>New</button>
+            <button class="btn" id="ed-save" title="Save (Ctrl+S)"><svg><use href="#i-save"/></svg>Save</button>
+            <button class="btn" id="ed-save-as">Save as…</button>
+            <button class="btn primary" id="ed-run"><svg><use href="#i-play"/></svg>Run in Live</button>
+          </div>
+        </div>
+
+        <div class="map-card">
+          <div class="map-bar">
+            <div class="tools" id="ed-tools" role="toolbar" aria-label="Editor tools">
+              <button class="tool" data-tool="pan" title="Pan (H) — or middle-drag / hold Space"><svg><use href="#t-pan"/></svg><span>Pan</span></button>
+              <span class="tool-sep"></span>
+              <button class="tool" data-tool="road" title="One-way road (1) — drag in the direction of travel"><svg><use href="#t-road"/></svg><span>Road</span></button>
+              <button class="tool" data-tool="lane" title="Two-way lane / junction (2)"><svg><use href="#t-lane"/></svg><span>Junction</span></button>
+              <button class="tool" data-tool="shelf" title="Shelf (3)"><svg><use href="#t-shelf"/></svg><span>Shelf</span></button>
+              <button class="tool" data-tool="wall" title="Wall (4)"><svg><use href="#t-wall"/></svg><span>Wall</span></button>
+              <button class="tool" data-tool="human" title="Human-only area (5)"><svg><use href="#t-human"/></svg><span>Human</span></button>
+              <button class="tool" data-tool="erase" title="Eraser (6)"><svg><use href="#t-erase"/></svg><span>Erase</span></button>
+              <div class="lanes-ctl" id="ed-lanes" title="Lanes per road ([ and ])">
+                <span>Lanes</span>
+                <button data-step="-1" aria-label="Fewer lanes">−</button>
+                <output id="ed-lanes-value">2</output>
+                <button data-step="1" aria-label="More lanes">+</button>
+              </div>
+            </div>
+            <div class="map-tools">
+              <button class="icon-btn" id="ed-undo" title="Undo (Ctrl+Z)"><svg><use href="#i-undo"/></svg></button>
+              <button class="icon-btn" id="ed-redo" title="Redo (Ctrl+Shift+Z)"><svg><use href="#i-redo"/></svg></button>
+              <button class="icon-btn" id="ed-fit" title="Fit to view (F)"><svg><use href="#i-fit"/></svg></button>
+            </div>
+          </div>
+
+          <div class="map-wrap">
+            <svg id="editor-map" class="map editor" xmlns="http://www.w3.org/2000/svg"></svg>
+          </div>
+
+          <div class="transport ed-status">
+            <span class="cursor" id="ed-cursor">—</span>
+            <div class="hint" id="ed-hint">Drag to paint a straight run · Shift-drag fills a rectangle · middle-drag or Space to pan · scroll to zoom</div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side" data-view="editor" hidden>
+        <section class="card ed-card">
+          <div class="card-head"><h2>Warehouse</h2><span class="card-hint">1 cell = 1 m</span></div>
+          <div class="ed-form">
+            <label>Width <input type="number" id="ed-width" min="3" max="200" /></label>
+            <label>Height <input type="number" id="ed-height" min="3" max="200" /></label>
+            <button class="btn" id="ed-resize">Resize</button>
+          </div>
+          <div class="ed-stats" id="ed-stats"></div>
+        </section>
+
+        <section class="card ed-issues-card">
+          <div class="card-head"><h2>Issues</h2><span class="card-hint" id="ed-issues-summary"></span></div>
+          <ul class="ed-issues" id="ed-issues"></ul>
+        </section>
+
+        <section class="card ed-help">
+          <div class="card-head"><h2>How roads work</h2></div>
+          <ul class="help">
+            <li><b>Road</b> paints one-way lanes in the direction you drag. With 2+ lanes, traffic keeps right: half the lanes go each way.</li>
+            <li>Where roads cross, or a road passes a station, cells become <b>junctions</b> (two-way). Robots only turn, change lanes or U-turn at junctions.</li>
+            <li>Use <b>Junction</b> to add turning points by hand, e.g. at the end of an aisle.</li>
+            <li>Stations and robots: next step. Existing ones are kept and shown.</li>
+          </ul>
+        </section>
+      </aside>
     </main>
   </div>
 
   <div class="toast" id="toast" hidden></div>
+
+  <dialog class="dialog" id="dlg">
+    <form method="dialog" id="dlg-form">
+      <h3 id="dlg-title"></h3>
+      <div class="dlg-body" id="dlg-body"></div>
+      <div class="dlg-actions">
+        <!-- OK first so Enter submits it; displayed on the right via row-reverse -->
+        <button class="btn primary" value="ok" id="dlg-ok">OK</button>
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
   <script type="module" src="/static/js/main.js"></script>
 </body>
 </html>

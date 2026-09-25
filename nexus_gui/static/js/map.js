@@ -26,12 +26,17 @@ const STATUS_RING = {
 export class MapView {
   constructor(svg) {
     this.svg = svg;
+    this.uid = `m${Math.random().toString(36).slice(2, 8)}`; // unique pattern ids per map
     this.layout = null;
     this.selected = null;
     this.robotNodes = new Map();
     this.hidden = new Set();
     this.onSelect = () => {};
     this.view = null;
+    // Editor hooks: when set, left-drag goes to the handler instead of panning
+    // (middle-drag, or panWithLeft = true, still pans).
+    this.editHandler = null;
+    this.panWithLeft = true;
     this._initPanZoom();
   }
 
@@ -51,7 +56,7 @@ export class MapView {
 
   // ------------------------------------------------------------ layout
 
-  setLayout(layout) {
+  setLayout(layout, { fit = true } = {}) {
     this.layout = layout;
     this.cs = layout.cell_size;
     this.worldW = layout.width * this.cs;
@@ -73,8 +78,10 @@ export class MapView {
     this.gReserved = el("g", { "data-layer": "reservations" }, this.svg);
     this.gPaths = el("g", { "data-layer": "paths" }, this.svg);
     this.gConflicts = el("g", { "data-layer": "conflicts" }, this.svg);
+    this.gMarkers = el("g", {}, this.svg);
     this.gRobots = el("g", {}, this.svg);
     this.gLabels = el("g", {}, this.svg);
+    this.gOverlay = el("g", {}, this.svg);
 
     this._drawFloor();
     this._drawCells();
@@ -82,15 +89,15 @@ export class MapView {
     this._drawZones();
     this._drawStations();
     this._applyLayers();
-    this.fit();
+    if (fit || !this.view) this.fit();
   }
 
   _defs() {
     const defs = el("defs", {}, this.svg);
-    const hatch = el("pattern", { id: "hatch-human", width: 0.28, height: 0.28, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
+    const hatch = el("pattern", { id: `${this.uid}-hatch`, width: 0.28, height: 0.28, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
     el("rect", { width: 0.28, height: 0.28, fill: "rgba(201,162,39,0.07)" }, hatch);
     el("line", { x1: 0, y1: 0, x2: 0, y2: 0.28, stroke: "rgba(201,162,39,0.55)", "stroke-width": 0.06 }, hatch);
-    const shelf = el("pattern", { id: "shelf-lines", width: 0.25, height: 0.25, patternUnits: "userSpaceOnUse" }, defs);
+    const shelf = el("pattern", { id: `${this.uid}-shelf`, width: 0.25, height: 0.25, patternUnits: "userSpaceOnUse" }, defs);
     el("rect", { width: 0.25, height: 0.25, fill: "var(--shelf)" }, shelf);
     el("line", { x1: 0, y1: 0.125, x2: 0.25, y2: 0.125, stroke: "var(--shelf-line)", "stroke-width": 0.03 }, shelf);
   }
@@ -132,11 +139,11 @@ export class MapView {
         if (LANE_CHARS.has(c) || this.stations.has(`${x},${y}`)) {
           el("rect", { ...this.cellRect(x, y, 0.02), rx: 0.06, fill: "var(--lane)" }, this.gCells);
         } else if (c === "S") {
-          el("rect", { ...this.cellRect(x, y, 0.07), rx: 0.08, fill: "url(#shelf-lines)", stroke: "var(--shelf-line)", "stroke-width": 0.03 }, this.gCells);
+          el("rect", { ...this.cellRect(x, y, 0.07), rx: 0.08, fill: `url(#${this.uid}-shelf)`, stroke: "var(--shelf-line)", "stroke-width": 0.03 }, this.gCells);
         } else if (c === "#") {
           el("rect", { ...this.cellRect(x, y, 0), fill: "var(--wall)" }, this.gCells);
         } else if (c === "H") {
-          el("rect", { ...this.cellRect(x, y, 0), fill: "url(#hatch-human)" }, this.gCells);
+          el("rect", { ...this.cellRect(x, y, 0), fill: `url(#${this.uid}-hatch)` }, this.gCells);
         }
       }
     }
@@ -377,11 +384,23 @@ export class MapView {
       this._applyView();
     }, { passive: false });
     svg.addEventListener("pointerdown", (event) => {
-      if (!this.view || event.button !== 0) return;
+      if (!this.view) return;
+      const pan = event.button === 1 || (event.button === 0 && (this.panWithLeft || !this.editHandler));
+      if (!pan && event.button === 0 && this.editHandler) {
+        const cell = this.cellAt(event);
+        svg.setPointerCapture(event.pointerId);
+        this.editHandler.down(cell, event);
+        return;
+      }
+      if (!pan) return;
+      if (event.button === 1) event.preventDefault();
       drag = { start: this._toWorld(event), moved: false, id: event.pointerId };
     });
     svg.addEventListener("pointermove", (event) => {
-      if (!drag) return;
+      if (!drag) {
+        if (this.editHandler) this.editHandler.move(this.cellAt(event), event);
+        return;
+      }
       const pt = this._toWorld(event);
       const dx = pt.x - drag.start.x, dy = pt.y - drag.start.y;
       if (!drag.moved && Math.hypot(dx, dy) < 0.15) return;
@@ -390,12 +409,46 @@ export class MapView {
       this._applyView();
     });
     const end = (event) => {
+      if (!drag && this.editHandler) {
+        this.editHandler.up(this.cellAt(event), event);
+        return;
+      }
       if (drag && !drag.moved && event.type === "pointerup" && !event.target.closest(".robot")) this.onSelect(null);
       drag = null;
       svg.classList.remove("dragging");
     };
     svg.addEventListener("pointerup", end);
     svg.addEventListener("pointercancel", end);
+    svg.addEventListener("pointerleave", () => { if (!drag && this.editHandler) this.editHandler.leave(); });
+    svg.addEventListener("auxclick", (event) => event.preventDefault());
+  }
+
+  // Cell under the pointer, or null outside the warehouse.
+  cellAt(event) {
+    if (!this.layout) return null;
+    const pt = this._toWorld(event);
+    const x = Math.floor(pt.x / this.cs);
+    const y = Math.floor((this.worldH - pt.y) / this.cs);
+    if (x < 0 || y < 0 || x >= this.layout.width || y >= this.layout.height) return null;
+    return [x, y];
+  }
+
+  // Static robot start/goal markers (editor).
+  drawRobotMarkers(markers) {
+    this.gMarkers.innerHTML = "";
+    for (const m of markers) {
+      if (m.start) {
+        const [x, y] = this.cellCenter(m.start[0], m.start[1]);
+        const g = el("g", { transform: `translate(${x} ${this.sy(y)})` }, this.gMarkers);
+        el("circle", { r: 0.34, fill: m.color, stroke: "#0b0c0e", "stroke-width": 0.05, "fill-opacity": 0.9 }, g);
+        const t = el("text", { y: 0.1, "font-size": 0.26, "font-weight": 800, fill: "#fff", "text-anchor": "middle" }, g);
+        t.textContent = m.id;
+      }
+      if (m.goal) {
+        const [x, y] = this.cellCenter(m.goal[0], m.goal[1]);
+        el("circle", { cx: x, cy: this.sy(y), r: 0.3, fill: "none", stroke: m.color, "stroke-width": 0.07, "stroke-dasharray": "0.14 0.1" }, this.gMarkers);
+      }
+    }
   }
 
   _toWorld(event) {

@@ -194,6 +194,17 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="NEXUS Control Room", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def revalidate_frontend(request, call_next):
+    # Without an explicit policy browsers may reuse a cached page/script
+    # after an update, so the GUI shows stale features. "no-cache" makes
+    # the browser revalidate every time (unchanged files answer 304).
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 # ----------------------------------------------------------------------
 # REST
 # ----------------------------------------------------------------------

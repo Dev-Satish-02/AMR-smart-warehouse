@@ -174,12 +174,21 @@ class Layout:
     # Validation
     # ------------------------------------------------------------------
 
-    def validate(self) -> List[Dict[str, str]]:
-        """Human-readable issues. Severity 'error' blocks simulation."""
-        issues: List[Dict[str, str]] = []
+    def validate(self) -> List[Dict[str, Any]]:
+        """
+        Human-readable issues: {severity, message, target, cells}.
+        Severity 'error' blocks simulation; 'warning' does not. `cells`
+        lists the [x, y] cells the editor should highlight.
+        """
+        issues: List[Dict[str, Any]] = []
 
-        def add(severity: str, message: str, target: str = ""):
-            issues.append({"severity": severity, "message": message, "target": target})
+        def add(severity: str, message: str, target: str = "", cells=()):
+            issues.append({
+                "severity": severity,
+                "message": message,
+                "target": target,
+                "cells": [[int(c[0]), int(c[1])] for c in cells],
+            })
 
         for station in self.data["stations"]:
             cell = (int(station["x"]), int(station["y"]))
@@ -187,36 +196,79 @@ class Layout:
                 add("error", f"Station {station['id']} is outside the warehouse", station["id"])
                 continue
             if not any(self.move_allowed(cell, n) or self.move_allowed(n, cell) for n in _neighbours(cell)):
-                add("warning", f"Station {station['id']} is not connected to any lane", station["id"])
+                add("warning", f"Station {station['id']} is not connected to any lane", station["id"], [cell])
+
+        # One-way lanes that robots can enter but never leave.
+        dead_ends = [
+            (x, y)
+            for y in range(self.height)
+            for x in range(self.width)
+            if self.is_lane((x, y)) and not self.is_station((x, y))
+            and not any(self.move_allowed((x, y), n) for n in _neighbours((x, y)))
+        ]
+        if dead_ends:
+            add("warning", f"{len(dead_ends)} lane cell(s) are dead ends: robots can't drive out of them",
+                "lanes", dead_ends[:200])
 
         starts: Dict[Cell, str] = {}
+        routable = []
         for robot in self.robots:
             rid = robot["id"]
             start = self.resolve_cell(robot.get("start"))
             goal = self.resolve_cell(robot.get("goal"))
+            ok = True
             if start is None:
                 add("error", f"{rid}: start is not set or unknown", rid)
-            elif not self.is_drivable(start):
-                add("error", f"{rid}: start {list(start)} is not a lane or station", rid)
+                ok = False
+            elif not self.in_bounds(start) or not self.is_drivable(start):
+                add("error", f"{rid}: start {list(start)} is not a lane or station", rid, [start] if self.in_bounds(start) else [])
+                ok = False
             elif start in starts:
-                add("error", f"{rid}: shares its start cell with {starts[start]}", rid)
+                add("error", f"{rid}: shares its start cell with {starts[start]}", rid, [start])
+                ok = False
             else:
                 starts[start] = rid
             if goal is None:
                 add("error", f"{rid}: goal is not set or unknown", rid)
-            elif not self.is_drivable(goal):
-                add("error", f"{rid}: goal {list(goal)} is not a lane or station", rid)
+                ok = False
+            elif not self.in_bounds(goal) or not self.is_drivable(goal):
+                add("error", f"{rid}: goal {list(goal)} is not a lane or station", rid, [goal] if self.in_bounds(goal) else [])
+                ok = False
             for via in robot.get("via", []):
-                if not self.is_drivable((int(via[0]), int(via[1]))):
-                    add("error", f"{rid}: via point {list(via)} is not a lane cell", rid)
+                cell = (int(via[0]), int(via[1]))
+                if not self.in_bounds(cell) or not self.is_lane(cell):
+                    add("error", f"{rid}: via point {list(via)} is not a lane cell", rid, [cell] if self.in_bounds(cell) else [])
+                    ok = False
+            if ok:
+                routable.append((robot, start, goal))
 
         goals: Dict[Cell, str] = {}
         for robot in self.robots:
             goal = self.resolve_cell(robot.get("goal"))
             if goal is not None and goal in goals:
-                add("warning", f"{robot['id']}: shares its goal with {goals[goal]}; one will wait", robot["id"])
+                add("warning", f"{robot['id']}: shares its goal with {goals[goal]}; one will wait", robot["id"], [goal])
             elif goal is not None:
                 goals[goal] = robot["id"]
+
+        # Reachability over the lane graph (one-way lanes included).
+        if routable:
+            from algorithms.lane_grid import LaneGrid
+
+            grid = LaneGrid(self, turn_penalty=float(self.simulation.get("turn_penalty", 1.0)))
+
+            def reachable(stops: List[Cell]) -> bool:
+                for a, b in zip(stops, stops[1:]):
+                    if not grid.plan(self.cell_center(a), self.cell_center(b)):
+                        return False
+                return True
+
+            for robot, start, goal in routable:
+                via = [(int(v[0]), int(v[1])) for v in robot.get("via", [])]
+                if not reachable([start] + via + [goal]):
+                    add("warning", f"{robot['id']}: no lane route from start to goal"
+                        + (" through its via-points" if via else ""), robot["id"], [start, goal])
+                elif robot.get("loop") and not reachable([goal, start]):
+                    add("warning", f"{robot['id']}: can reach its goal but has no lane route back", robot["id"], [goal, start])
 
         return issues
 
