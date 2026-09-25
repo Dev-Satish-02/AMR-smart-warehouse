@@ -57,6 +57,9 @@ class GridWorld:
         self.time_step = float(time_step)
         self.time = 0.0
         self.robot_list: List[GridRobot] = []
+        # Speed caps (safety zones) apply from this far before a capped
+        # route point, i.e. from the edge of its cell.
+        self.cap_lead = 0.5
 
     def add_robot(self, position, heading: float = 0.0) -> GridRobot:
         robot = GridRobot(position, heading)
@@ -86,9 +89,28 @@ class GridWorld:
             previous = point
         return total
 
-    def _move(self, robot: GridRobot, route: List[np.ndarray], max_speed: float, dt: float) -> int:
+    def _cap_speed(self, position: np.ndarray, route: List[np.ndarray], caps: List[Optional[float]], limit: float) -> float:
+        """Highest speed from which the robot can still slow to every capped
+        route point's limit (by the edge of its cell) before reaching it."""
+        allowed = limit
+        travelled = 0.0
+        previous = position
+        for point, cap in zip(route, caps):
+            travelled += float(np.linalg.norm(point - previous))
+            previous = point
+            if cap is None:
+                continue
+            distance = max(0.0, travelled - self.cap_lead)
+            allowed = min(allowed, math.sqrt(cap * cap + 2.0 * self.acceleration * distance))
+            if travelled > 4.0:  # far enough ahead
+                break
+        return allowed
+
+    def _move(self, robot: GridRobot, route: List[np.ndarray], max_speed: float, dt: float,
+              caps: Optional[List[Optional[float]]] = None) -> int:
         """Drive along route; returns how many route points were reached."""
         route = [np.asarray(p, dtype=float) for p in route]
+        caps = list(caps) if caps is not None else [None] * len(route)
         total = len(route)
         time_left = dt
         robot.turning = False
@@ -98,6 +120,7 @@ class GridWorld:
             # Drop waypoints we are already standing on.
             while route and np.linalg.norm(route[0] - robot.position) < 1e-6:
                 route.pop(0)
+                caps.pop(0)
             if not route:
                 robot.speed = 0.0
                 break
@@ -119,7 +142,8 @@ class GridWorld:
             robot.state[2] = desired
             stop_distance = self._stop_distance(robot.position, route)
             braking_speed = math.sqrt(max(0.0, 2.0 * self.acceleration * stop_distance))
-            speed = min(robot.speed + self.acceleration * time_left, max_speed, braking_speed)
+            zone_speed = self._cap_speed(robot.position, route, caps, max_speed)
+            speed = min(robot.speed + self.acceleration * time_left, max_speed, braking_speed, zone_speed)
 
             travel = min(speed * time_left, stop_distance)
             robot.speed = speed
@@ -133,6 +157,7 @@ class GridWorld:
                     robot.state[0], robot.state[1] = route[0][0], route[0][1]
                     remaining -= length
                     route.pop(0)
+                    caps.pop(0)
                     if route:
                         nxt = route[0] - robot.position
                         if np.linalg.norm(nxt) > 1e-9 and abs(wrap_angle(math.atan2(nxt[1], nxt[0]) - robot.heading)) > 1e-3:
@@ -153,10 +178,13 @@ class GridWorld:
         robot.velocity = moved / dt if dt > 0 else np.zeros(2)
         return total - len(route)
 
-    def step(self, routes: Sequence[List[np.ndarray]], speeds: Optional[Sequence[float]] = None) -> List[int]:
+    def step(self, routes: Sequence[List[np.ndarray]], speeds: Optional[Sequence[float]] = None,
+             caps: Optional[Sequence[List[Optional[float]]]] = None) -> List[int]:
         """
         routes[i]: world points robot i may drive through this step, in order,
         ending at the last cell it holds a reservation for.
+        speeds[i]: speed limit right now (robot max, current safety zone).
+        caps[i][k]: speed cap of the cell of routes[i][k] (None = no cap).
         Returns, per robot, the number of route points reached.
         """
         dt = self.time_step
@@ -164,7 +192,8 @@ class GridWorld:
         for index, robot in enumerate(self.robot_list):
             route = routes[index] if index < len(routes) else []
             limit = self.max_speed if speeds is None else min(self.max_speed, speeds[index])
-            reached.append(self._move(robot, list(route), limit, dt))
+            route_caps = caps[index] if caps is not None and index < len(caps) else None
+            reached.append(self._move(robot, list(route), limit, dt, route_caps))
         self.time = round(self.time + dt, 9)
         return reached
 

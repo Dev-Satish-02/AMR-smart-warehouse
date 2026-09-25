@@ -1,5 +1,6 @@
 import { MapView } from "./map.js";
 import { Editor } from "./editor.js";
+import { loadCatalog } from "./catalog.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -436,7 +437,7 @@ window.nexus = { app, map, editor, setMode: (m) => setMode(m) };
 
 initControls();
 initSplitter();
-loadLayoutList().then(() => {
+loadCatalog().then(() => editor.populateCatalog()).then(loadLayoutList).then(() => {
   connect();
   if (location.hash === "#editor") setMode("editor");
 });

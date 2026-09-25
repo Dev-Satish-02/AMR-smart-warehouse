@@ -12,6 +12,7 @@ A layout is a JSON document:
       "rows": ["#####...", ...],           # rows[0] is the TOP row (y = height - 1)
       "stations": [{"id": "L1", "type": "loading", "x": 1, "y": 4, "label": "Dock 1"}],
       "robots": [{"id": "R1", "start": "L1", "goal": "U2", "via": [[5, 4]]}],
+      "objects": [{"id": "O1", "type": "rack", "name": "Rack A-01", "x": 4, "y": 6, "w": 6, "h": 2}],
       "simulation": {"time_step": 0.1}
     }
 
@@ -21,12 +22,17 @@ Cell characters:
     #   wall
     S   shelf
     H   human-only area
+    W   pedestrian walkway (people only, robots never enter)
     +   two-way robot lane
     > < ^ v   one-way robot lane (direction of travel)
 
 Station cells are drivable, but only as a path start or goal (robots never
 drive *through* a station). Robot start/goal may be a station id or an [x, y]
 cell. Cell (x, y) has its centre at ((x + 0.5) * cell_size, (y + 0.5) * cell_size).
+
+Objects are named rectangles (see nexus/catalog.py): blocking equipment and
+racks make their cells undrivable; areas are labels only; safety zones
+(crosswalk, slow zone) cap robot speed on the cells they cover.
 """
 
 from __future__ import annotations
@@ -39,12 +45,15 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 
+from nexus.catalog import OBJECT_TYPES, object_type
+
 Cell = Tuple[int, int]
 
 FLOOR = "."
 WALL = "#"
 SHELF = "S"
 HUMAN = "H"
+WALKWAY = "W"
 LANE = "+"
 ONE_WAY = {">": (1, 0), "<": (-1, 0), "^": (0, 1), "v": (0, -1)}
 
@@ -53,6 +62,7 @@ CELL_TYPES = {
     WALL: "wall",
     SHELF: "shelf",
     HUMAN: "human",
+    WALKWAY: "walkway",
     LANE: "lane",
     ">": "lane",
     "<": "lane",
@@ -103,6 +113,21 @@ class Layout:
         }
         self.robots: List[Dict[str, Any]] = d["robots"]
         self.simulation: Dict[str, Any] = d["simulation"]
+        self.objects: List[Dict[str, Any]] = d["objects"]
+
+        # Cells covered by blocking objects, and speed caps from safety zones.
+        self.blocked: Dict[Cell, Dict[str, Any]] = {}
+        self.speed_caps: Dict[Cell, float] = {}
+        for obj in self.objects:
+            info = object_type(obj["type"])
+            for cell in object_cells(obj):
+                if not self.in_bounds(cell):
+                    continue
+                if info.get("blocking"):
+                    self.blocked.setdefault(cell, obj)
+                limit = obj.get("speed_limit", info.get("speed_limit"))
+                if limit is not None:
+                    self.speed_caps[cell] = min(float(limit), self.speed_caps.get(cell, float("inf")))
 
     # ------------------------------------------------------------------
     # Cells
@@ -120,10 +145,29 @@ class Layout:
         return cell in self.station_cells
 
     def is_lane(self, cell: Cell) -> bool:
-        return self.in_bounds(cell) and CELL_TYPES.get(self.char(cell)) == "lane"
+        return (
+            self.in_bounds(cell)
+            and CELL_TYPES.get(self.char(cell)) == "lane"
+            and cell not in self.blocked
+        )
 
     def is_drivable(self, cell: Cell) -> bool:
-        return self.in_bounds(cell) and (self.is_station(cell) or self.is_lane(cell))
+        return (
+            self.in_bounds(cell)
+            and cell not in self.blocked
+            and (self.is_station(cell) or self.is_lane(cell))
+        )
+
+    def speed_limit(self, cell: Cell) -> Optional[float]:
+        """Robot speed cap (m/s) from safety zones on this cell, if any."""
+        return self.speed_caps.get(cell)
+
+    def cost_factor(self, cell: Cell) -> float:
+        """Planner cost multiplier: slow cells cost as long as they take to cross."""
+        limit = self.speed_caps.get(cell)
+        if limit is None or limit <= 0:
+            return 1.0
+        return max(1.0, float(self.simulation.get("max_speed", 1.0)) / limit)
 
     def direction(self, cell: Cell) -> Optional[Tuple[int, int]]:
         """Allowed travel direction of a one-way lane cell, else None."""
@@ -199,10 +243,32 @@ class Layout:
                 "cells": [[int(c[0]), int(c[1])] for c in cells],
             })
 
+        names: Dict[str, str] = {}
+        for obj in self.objects:
+            cells = object_cells(obj)
+            label = obj.get("name") or obj["id"]
+            if obj["type"] not in OBJECT_TYPES:
+                add("error", f"{label}: unknown object type '{obj['type']}'", obj["id"])
+            if not all(self.in_bounds(c) for c in cells):
+                add("error", f"{label} extends outside the warehouse", obj["id"],
+                    [c for c in cells if self.in_bounds(c)][:50])
+            limit = obj.get("speed_limit", object_type(obj["type"]).get("speed_limit"))
+            if limit is not None and not (0 < float(limit) <= 5):
+                add("error", f"{label}: speed limit must be between 0 and 5 m/s", obj["id"])
+            key = label.strip().lower()
+            if key in names:
+                add("warning", f"Two objects are named '{label}'", obj["id"])
+            else:
+                names[key] = obj["id"]
+
         for station in self.data["stations"]:
             cell = (int(station["x"]), int(station["y"]))
             if not self.in_bounds(cell):
                 add("error", f"Station {station['id']} is outside the warehouse", station["id"])
+                continue
+            if cell in self.blocked:
+                owner = self.blocked[cell]
+                add("error", f"Station {station['id']} is inside {owner.get('name') or owner['id']}", station["id"], [cell])
                 continue
             if not any(self.move_allowed(cell, n) or self.move_allowed(n, cell) for n in _neighbours(cell)):
                 add("warning", f"Station {station['id']} is not connected to any lane", station["id"], [cell])
@@ -292,6 +358,15 @@ class Layout:
         return deepcopy(self.data)
 
 
+def object_cells(obj: Dict[str, Any]) -> List[Cell]:
+    """Cells covered by an object rectangle (x, y = bottom-left cell)."""
+    return [
+        (obj["x"] + dx, obj["y"] + dy)
+        for dy in range(int(obj["h"]))
+        for dx in range(int(obj["w"]))
+    ]
+
+
 def _neighbours(cell: Cell) -> List[Cell]:
     x, y = cell
     return [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
@@ -346,6 +421,25 @@ def normalize(data: Dict[str, Any]) -> Dict[str, Any]:
         robot["via"] = [[int(v[0]), int(v[1])] for v in robot.get("via", [])]
         robots.append(robot)
     d["robots"] = robots
+
+    objects = []
+    seen = set()
+    for index, obj in enumerate(d.get("objects") or []):
+        obj = dict(obj)
+        obj.setdefault("id", f"O{index + 1}")
+        if obj["id"] in seen:
+            raise LayoutError(f"Duplicate object id {obj['id']}")
+        seen.add(obj["id"])
+        obj.setdefault("type", "machine")
+        obj.setdefault("name", object_type(obj["type"])["label"])
+        for field in ("x", "y"):
+            obj[field] = int(obj.get(field, 0))
+        for field in ("w", "h"):
+            obj[field] = max(1, int(obj.get(field, 1)))
+        if "speed_limit" in obj and obj["speed_limit"] is not None:
+            obj["speed_limit"] = float(obj["speed_limit"])
+        objects.append(obj)
+    d["objects"] = objects
 
     simulation = dict(DEFAULT_SIMULATION)
     simulation.update(d.get("simulation") or {})

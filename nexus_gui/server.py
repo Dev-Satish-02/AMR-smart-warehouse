@@ -20,6 +20,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from nexus.catalog import catalog
 from nexus.grid_simulation import GridSimulation
 from nexus.layout import Layout, LayoutError, STATION_TYPES, load_layout, normalize, save_layout
 
@@ -212,6 +213,12 @@ async def revalidate_frontend(request, call_next):
 @app.get("/api/layouts")
 def api_layouts():
     return {"layouts": list_layouts(), "active": controller.layout_name, "station_types": list(STATION_TYPES)}
+
+
+@app.get("/api/catalog")
+def api_catalog():
+    """Object types (racks, equipment, areas, safety zones) and station types."""
+    return {**catalog(), "station_types": list(STATION_TYPES)}
 
 
 @app.get("/api/layouts/{name}")

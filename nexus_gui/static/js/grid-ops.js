@@ -253,3 +253,47 @@ export function labelPlacement(cells, maxThickness = 6) {
   }
   return best;
 }
+
+// ------------------------------------------------------------------ walkways
+
+export const WALKWAY = "W";
+
+// Paint a pedestrian walkway without cutting robot roads: lane cells (and
+// station cells) are left as they are and returned as `crossings`, where the
+// editor places crosswalks. Returns { changed, crossings }.
+export function paintWalkway(grid, cells, stationCells = new Set()) {
+  let changed = 0;
+  const crossings = [];
+  for (const [x, y] of cells) {
+    if (!inBounds(grid, x, y)) continue;
+    if (isLane(grid[y][x]) || stationCells.has(key(x, y))) {
+      if (isLane(grid[y][x])) crossings.push([x, y]);
+      continue;
+    }
+    if (grid[y][x] !== WALKWAY) { grid[y][x] = WALKWAY; changed++; }
+  }
+  return { changed, crossings };
+}
+
+// Group cells into 4-connected clusters and return each cluster's bounding
+// rectangle { x, y, w, h } (bottom-left cell + size).
+export function clusterRects(cells) {
+  const left = new Set(cells.map(([x, y]) => key(x, y)));
+  const rects = [];
+  for (const [sx, sy] of cells) {
+    if (!left.has(key(sx, sy))) continue;
+    left.delete(key(sx, sy));
+    const stack = [[sx, sy]];
+    let x0 = sx, x1 = sx, y0 = sy, y1 = sy;
+    while (stack.length) {
+      const [x, y] = stack.pop();
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const k = key(x + dx, y + dy);
+        if (left.has(k)) { left.delete(k); stack.push([x + dx, y + dy]); }
+      }
+    }
+    rects.push({ x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 });
+  }
+  return rects;
+}

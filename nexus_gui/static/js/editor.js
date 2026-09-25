@@ -5,6 +5,7 @@
 import { MapView, el } from "./map.js";
 import * as ops from "./grid-ops.js";
 import * as docs from "./doc-ops.js";
+import { CATALOG, objectType, speedLimit } from "./catalog.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -16,15 +17,17 @@ const TOOLS = {
   shelf: { label: "Shelf", char: ops.SHELF, color: "#6b7482" },
   wall: { label: "Wall", char: ops.WALL, color: "#9aa0aa" },
   human: { label: "Human-only area", char: ops.HUMAN, color: "#c9a227" },
+  walkway: { label: "Walkway", char: "W", color: "#c9a227" },
   erase: { label: "Eraser", char: ops.FLOOR, color: "#d03b3b" },
   station: { label: "Station" },
   route: { label: "Route" },
+  object: { label: "Object", color: "#8fb8ff" },
 };
-const PAINT_TOOLS = new Set(["road", "lane", "shelf", "wall", "human", "erase"]);
-const TOOL_KEYS = { h: "pan", v: "select", 1: "road", 2: "lane", 3: "shelf", 4: "wall", 5: "human", 6: "erase", 7: "station", 8: "route" };
+const PAINT_TOOLS = new Set(["road", "lane", "shelf", "wall", "human", "walkway", "erase"]);
+const TOOL_KEYS = { h: "pan", v: "select", 1: "road", 2: "lane", 3: "shelf", 4: "wall", 5: "human", 6: "erase", 7: "station", 8: "route", 9: "walkway", 0: "object" };
 
 const CELL_NAMES = {
-  ".": "Floor", "#": "Wall", S: "Shelf", H: "Human-only", "+": "Junction (two-way)",
+  ".": "Floor", "#": "Wall", S: "Shelf", H: "Human-only", W: "Walkway (people only)", "+": "Junction (two-way)",
   ">": "One-way lane →", "<": "One-way lane ←", "^": "One-way lane ↑", v: "One-way lane ↓",
 };
 
@@ -36,6 +39,7 @@ const TOOL_HINTS = {
   select: "Click a station or robot to edit it · drag robot starts, goals, via-points and stations to move them (robots on top)",
   station: "Click a cell to place a station of the chosen type · drag an existing station to move it",
   route: "Click lane cells to add via-points in order · click a via-point to remove it",
+  object: "Drag a rectangle to place the chosen object · select it to rename, resize or change its type",
 };
 
 const MAX_UNDO = 100;
@@ -63,6 +67,7 @@ export class Editor {
     this.tool = "road";
     this.lanes = 2;
     this.stationType = "loading";
+    this.objectType = "rack";
     this.lastDir = [1, 0];
     this.stroke = null;
     this.drag = null;
@@ -98,6 +103,7 @@ export class Editor {
       grid: ops.gridFromRows(layout.rows),
       stations: structuredClone(layout.stations || []),
       robots: structuredClone(layout.robots || []).map((r) => ({ ...r, via: r.via || [] })),
+      objects: structuredClone(layout.objects || []),
       simulation: structuredClone(layout.simulation || {}),
     };
     this.file = file;
@@ -124,6 +130,7 @@ export class Editor {
       rows: ops.rowsFromGrid(d.grid),
       stations: d.stations,
       robots: d.robots,
+      objects: d.objects,
       simulation: d.simulation,
     };
   }
@@ -151,10 +158,14 @@ export class Editor {
     return this.selection?.kind === "station" ? this.doc.stations.find((s) => s.id === this.selection.id) || null : null;
   }
 
+  selectedObject() {
+    return this.selection?.kind === "object" ? this.doc.objects.find((o) => o.id === this.selection.id) || null : null;
+  }
+
   // ================================================================ undo
 
   snapshot() {
-    return JSON.stringify({ grid: this.doc.grid, stations: this.doc.stations, robots: this.doc.robots, name: this.doc.name });
+    return JSON.stringify({ grid: this.doc.grid, stations: this.doc.stations, robots: this.doc.robots, objects: this.doc.objects, name: this.doc.name });
   }
 
   restore(snap) {
@@ -197,7 +208,7 @@ export class Editor {
 
   render({ fit = false } = {}) {
     // Drop a selection whose object no longer exists (undo, delete).
-    if (this.selection && !this.selectedRobot() && !this.selectedStation()) this.selection = null;
+    if (this.selection && !this.selectedRobot() && !this.selectedStation() && !this.selectedObject()) this.selection = null;
 
     const layout = this.toLayout();
     this.map.setLayout(layout, { fit });
@@ -226,10 +237,12 @@ export class Editor {
       stat(`${layout.width}×${layout.height}`, "metres"),
       stat(c.lane, "lane cells"),
       stat(c.junction, "junctions"),
-      stat(c.shelf, "shelf cells"),
+      stat(this.doc.objects.length, "named objects"),
       stat(this.doc.stations.length, "stations"),
       stat(this.doc.robots.length, "robots"),
     ].join("");
+    $("#ed-convert").hidden = c.shelf === 0;
+    $("#ed-convert-text").textContent = `${c.shelf} painted shelf cell${c.shelf === 1 ? "" : "s"} without names`;
     this._drawRoutes();
     this._drawHighlight();
     this._drawSelection();
@@ -312,6 +325,15 @@ export class Editor {
     const station = this.selectedStation();
     if (station) {
       el("rect", { ...this._cellRect(station.x, station.y, -0.08), rx: 0.2, fill: "none", stroke: "var(--text)", "stroke-width": 0.07 }, this.gSelection);
+    }
+    const obj = this.selectedObject();
+    if (obj) {
+      const cs = this.map.cs;
+      el("rect", {
+        x: obj.x * cs - 0.08, y: this.map.worldH - (obj.y + obj.h) * cs - 0.08,
+        width: obj.w * cs + 0.16, height: obj.h * cs + 0.16, rx: 0.16,
+        fill: "none", stroke: "var(--text)", "stroke-width": 0.07, "stroke-dasharray": "0.3 0.15",
+      }, this.gSelection);
     }
     const robot = this.selectedRobot();
     if (robot) {
@@ -411,9 +433,44 @@ export class Editor {
       return;
     }
 
+    const obj = this.selectedObject();
+    if (obj) {
+      const info = objectType(obj.type);
+      const families = CATALOG.families || {};
+      const groups = Object.entries(families).map(([family, title]) => {
+        const options = Object.entries(CATALOG.object_types)
+          .filter(([, t]) => t.family === family)
+          .map(([type, t]) => `<option value="${type}" ${type === obj.type ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("");
+        return `<optgroup label="${escapeHtml(title)}">${options}</optgroup>`;
+      }).join("");
+      const effect = info.family === "zone"
+        ? `Robots slow to ≤ ${speedLimit(obj)} m/s here; the planner avoids it when a similar route exists.`
+        : info.blocking ? "Robots route around it." : "Label only: robots may drive lanes through it.";
+      box.innerHTML = `
+        <h3><svg width="18" height="18"><use href="#ob-${obj.type}"/></svg>${escapeHtml(info.label)} <span class="muted">${escapeHtml(obj.id)}</span></h3>
+        <div class="fields">
+          <label>Name</label><input type="text" data-field="object-name" value="${escapeHtml(obj.name)}" />
+          <label>Type</label><select data-field="object-type">${groups}</select>
+          <label>Placement</label>
+          <div class="grid4">
+            <label><span>x</span><input type="number" data-field="obj-x" min="0" value="${obj.x}" /></label>
+            <label><span>y</span><input type="number" data-field="obj-y" min="0" value="${obj.y}" /></label>
+            <label><span>width</span><input type="number" data-field="obj-w" min="1" value="${obj.w}" /></label>
+            <label><span>height</span><input type="number" data-field="obj-h" min="1" value="${obj.h}" /></label>
+          </div>
+          ${info.family === "zone" ? `<label>Speed limit</label><div class="pair"><input type="number" data-field="speed_limit" min="0.1" max="1" step="0.1" value="${speedLimit(obj)}" /><span class="muted">m/s</span></div>` : ""}
+        </div>
+        <div class="route-stats">${effect}</div>
+        <div class="inspect-actions">
+          <button class="btn small danger" data-action="delete-object"><svg><use href="#i-trash"/></svg>Delete</button>
+        </div>`;
+      return;
+    }
+
     box.innerHTML = `<div class="ed-empty">
       Select a robot above, or a station or robot on the map (<b>Select</b> tool, V), to edit it.<br />
-      <b>Station</b> (7) places stations · <b>Route</b> (8) adds via-points for the selected robot.<br />
+      <b>Station</b> (7) places stations · <b>Object</b> (0) places racks, equipment, areas and safety zones · <b>Route</b> (8) adds via-points.<br />
+      Everything with a name can be renamed here.<br />
       Robots only turn, change lanes or U-turn at <b>junctions</b>.
     </div>`;
   }
@@ -445,6 +502,31 @@ export class Editor {
         this.change(() => { robot.max_speed = speed; });
       } else if (field === "loop") {
         this.change(() => { if (value) robot.loop = true; else delete robot.loop; });
+      }
+      return;
+    }
+
+    const obj = this.selectedObject();
+    if (obj) {
+      if (field === "object-name") {
+        const before = this.snapshot();
+        if (!docs.renameObject(this.doc, obj.id, value)) { this.toast("Names can't be empty"); this.render(); return; }
+        this.commit(before);
+      } else if (field === "object-type") {
+        this.change(() => {
+          const oldLabel = objectType(obj.type).label;
+          obj.type = value;
+          delete obj.speed_limit;
+          // Keep custom names; refresh auto-generated ones.
+          if (obj.name.startsWith(oldLabel)) obj.name = docs.nextObjectName(this.doc, value);
+        });
+      } else if (["obj-x", "obj-y"].includes(field)) {
+        this.change(() => docs.moveObject(this.doc, obj.id, field === "obj-x" ? Number(value) : obj.x, field === "obj-y" ? Number(value) : obj.y));
+      } else if (["obj-w", "obj-h"].includes(field)) {
+        this.change(() => docs.resizeObject(this.doc, obj.id, field === "obj-w" ? Number(value) : obj.w, field === "obj-h" ? Number(value) : obj.h));
+      } else if (field === "speed_limit") {
+        const limit = Math.min(1, Math.max(0.1, Number(value) || 0.3));
+        this.change(() => { obj.speed_limit = limit; });
       }
       return;
     }
@@ -483,13 +565,17 @@ export class Editor {
     const action = event.target.closest("[data-action]")?.dataset.action;
     if (action === "edit-route") this.setTool(this.tool === "route" ? "select" : "route");
     else if (action === "clear-via" && robot) this.change(() => { robot.via = []; });
-    else if (action === "delete-robot" || action === "delete-station") this.deleteSelection();
+    else if (["delete-robot", "delete-station", "delete-object"].includes(action)) this.deleteSelection();
   }
 
   deleteSelection() {
     const robot = this.selectedRobot();
     const station = this.selectedStation();
-    if (robot) {
+    const obj = this.selectedObject();
+    if (obj) {
+      this.selection = null;
+      this.change(() => docs.removeObject(this.doc, obj.id));
+    } else if (robot) {
       this.selection = null;
       this.change(() => docs.removeRobot(this.doc, robot.id));
     } else if (station) {
@@ -520,6 +606,7 @@ export class Editor {
     for (const btn of document.querySelectorAll("#ed-tools .tool")) btn.classList.toggle("active", btn.dataset.tool === tool);
     $("#ed-lanes").hidden = tool !== "road";
     $("#ed-station-type").hidden = tool !== "station";
+    $("#ed-object-type").hidden = tool !== "object";
     this._setHint(TOOL_HINTS[tool] || DEFAULT_HINT);
     this._updatePanMode();
     if (this.loaded) this._renderInspector();
@@ -596,6 +683,8 @@ export class Editor {
     if (station) return { what: "station", id: station.id };
     const goaler = [...this.doc.robots].reverse().find((r) => same(docs.resolveRef(this.doc, r.goal), cell));
     if (goaler) return { what: "goal", id: goaler.id };
+    const obj = docs.objectAt(this.doc, cell[0], cell[1]);
+    if (obj) return { what: "object", id: obj.id, grab: [cell[0] - obj.x, cell[1] - obj.y] };
     return null;
   }
 
@@ -621,6 +710,12 @@ export class Editor {
       return;
     }
 
+    if (this.tool === "object") {
+      this.stroke = { start: cell, current: cell, rect: true };
+      this._drawPreview();
+      return;
+    }
+
     if (this.tool === "station") {
       const existing = docs.stationAt(this.doc, cell[0], cell[1]);
       if (existing) {
@@ -638,7 +733,7 @@ export class Editor {
     if (this.tool === "select") {
       const hit = this._hit(cell);
       if (!hit) { this.select(null); return; }
-      this.select({ kind: hit.what === "station" ? "station" : "robot", id: hit.id });
+      this.select({ kind: hit.what === "station" || hit.what === "object" ? hit.what : "robot", id: hit.id });
       this.drag = { ...hit, before: this.snapshot(), last: cell, moved: false };
     }
   }
@@ -660,7 +755,9 @@ export class Editor {
   _dragTo(cell) {
     const d = this.drag;
     let ok = true;
-    if (d.what === "station") {
+    if (d.what === "object") {
+      ok = docs.moveObject(this.doc, d.id, cell[0] - d.grab[0], cell[1] - d.grab[1]);
+    } else if (d.what === "station") {
       const ch = this.doc.grid[cell[1]][cell[0]];
       ok = ch !== ops.WALL && ch !== ops.SHELF && docs.moveStation(this.doc, d.id, cell[0], cell[1]);
     } else {
@@ -691,6 +788,18 @@ export class Editor {
       return;
     }
     if (!this.stroke) return;
+    if (this.tool === "object") {
+      const { start, current } = this.stroke;
+      this.stroke = null;
+      this.gPreview.innerHTML = "";
+      const rect = {
+        x: Math.min(start[0], current[0]), y: Math.min(start[1], current[1]),
+        w: Math.abs(current[0] - start[0]) + 1, h: Math.abs(current[1] - start[1]) + 1,
+      };
+      const obj = this.change(() => docs.addObject(this.doc, this.objectType, rect));
+      this.select({ kind: "object", id: obj.id });
+      return;
+    }
     const cells = this._strokeCells();
     const before = this.snapshot();
     let changed = 0;
@@ -699,6 +808,13 @@ export class Editor {
       if (dir) this.lastDir = dir;
       const stationCells = new Set(this.doc.stations.map((s) => `${s.x},${s.y}`));
       changed = ops.paintRoad(this.doc.grid, cells, stationCells);
+    } else if (this.tool === "walkway") {
+      // Walkways never cut robot roads: crossings become crosswalks.
+      const stationCells = new Set(this.doc.stations.map((s) => `${s.x},${s.y}`));
+      const result = ops.paintWalkway(this.doc.grid, cells.map((c) => [c.x, c.y]), stationCells);
+      const crosswalks = docs.addCrosswalks(this.doc, result.crossings);
+      changed = result.changed + crosswalks.length;
+      if (crosswalks.length) this.toast(`Added ${crosswalks.length} crosswalk${crosswalks.length === 1 ? "" : "s"} where the walkway crosses robot lanes`);
     } else {
       changed = ops.paintCells(this.doc.grid, cells.map((c) => [c.x, c.y]), TOOLS[this.tool].char);
     }
@@ -723,7 +839,7 @@ export class Editor {
   _drawPreview() {
     this.gPreview.innerHTML = "";
     if (!this.stroke) return;
-    const color = TOOLS[this.tool].color;
+    const color = TOOLS[this.tool].color || "#8fb8ff";
     const width = this.doc.grid[0].length, height = this.doc.grid.length;
     for (const c of this._strokeCells()) {
       if (c.x < 0 || c.y < 0 || c.x >= width || c.y >= height) continue;
@@ -753,7 +869,9 @@ export class Editor {
     if (!cell) { node.textContent = "—"; return; }
     const [x, y] = cell;
     const station = docs.stationAt(this.doc, x, y);
-    const what = station ? `Station ${station.label || station.id} (${station.type})` : CELL_NAMES[this.doc.grid[y][x]] || "";
+    const obj = docs.objectAt(this.doc, x, y);
+    let what = station ? `Station ${station.label || station.id} (${station.type})` : CELL_NAMES[this.doc.grid[y][x]] || "";
+    if (obj && !station) what = `${obj.name} (${objectType(obj.type).label}) · ${what}`;
     let extra = "";
     if (this.stroke) {
       const n = this._strokeCells().length;
@@ -957,6 +1075,17 @@ export class Editor {
     if (event.code === "Space" && this.spaceHeld) { this.spaceHeld = false; this._updatePanMode(); }
   }
 
+  // Fill the Object tool's type picker from the catalogue (after it loads).
+  populateCatalog() {
+    const select = $("#ed-object-type-select");
+    select.innerHTML = Object.entries(CATALOG.families || {}).map(([family, title]) => {
+      const options = Object.entries(CATALOG.object_types)
+        .filter(([, t]) => t.family === family)
+        .map(([type, t]) => `<option value="${type}" ${type === this.objectType ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("");
+      return `<optgroup label="${escapeHtml(title)}">${options}</optgroup>`;
+    }).join("");
+  }
+
   _bind() {
     $("#ed-tools").addEventListener("click", (event) => {
       const tool = event.target.closest(".tool");
@@ -965,6 +1094,11 @@ export class Editor {
       if (step) { this.setLanes(this.lanes + Number(step.dataset.step)); this.setTool("road"); }
     });
     $("#ed-station-type-select").addEventListener("change", (event) => { this.stationType = event.target.value; });
+    $("#ed-object-type-select").addEventListener("change", (event) => { this.objectType = event.target.value; });
+    $("#ed-convert-btn").addEventListener("click", () => {
+      const racks = this.change(() => docs.shelvesToRacks(this.doc));
+      this.toast(`Created ${racks.length} named rack${racks.length === 1 ? "" : "s"}: select one to rename it`);
+    });
     $("#ed-undo").addEventListener("click", () => this.undo());
     $("#ed-redo").addEventListener("click", () => this.redo());
     $("#ed-fit").addEventListener("click", () => this.map.fit());

@@ -4,7 +4,8 @@
 // bottom (see grid-ops.js). Robot start/goal are a station id (string) or an
 // [x, y] cell; via is a list of [x, y] lane cells.
 
-import { CHAR_DIR, LANE, inBounds } from "./grid-ops.js";
+import { CHAR_DIR, LANE, SHELF, FLOOR, inBounds, clusterRects } from "./grid-ops.js";
+import { objectType } from "./catalog.js";
 
 export const STATION_TYPES = ["loading", "unloading", "workstation", "charging"];
 export const STATION_PREFIX = { loading: "L", unloading: "U", workstation: "W", charging: "C" };
@@ -132,4 +133,143 @@ export function toggleVia(robot, x, y) {
   }
   robot.via.push([x, y]);
   return "added";
+}
+
+// ================================================================== objects
+//
+// Objects are named rectangles { id, type, name, x, y, w, h[, speed_limit] }
+// with (x, y) the bottom-left cell. Types come from the catalogue.
+
+const FAMILY_ORDER = { zone: 0, storage: 1, production: 1, facility: 1, area: 2 };
+
+// Topmost object on a cell: safety zones first, then equipment, then areas.
+export function objectAt(doc, x, y) {
+  let best = null;
+  for (const obj of doc.objects || []) {
+    if (x < obj.x || y < obj.y || x >= obj.x + obj.w || y >= obj.y + obj.h) continue;
+    const rank = FAMILY_ORDER[objectType(obj.type).family] ?? 1;
+    if (!best || rank <= best.rank) best = { obj, rank };
+  }
+  return best ? best.obj : null;
+}
+
+const RACK_NAME = /^Rack ([A-Z])-(\d+)$/;
+const pad = (n) => String(n).padStart(2, "0");
+
+// Next free default name: racks continue "Rack A-01, A-02, ..."; other
+// types are "<Label> 1, 2, ...".
+export function nextObjectName(doc, type) {
+  const names = new Set((doc.objects || []).map((o) => o.name));
+  if (type === "rack") {
+    let letter = "A", number = 0;
+    for (const name of names) {
+      const m = RACK_NAME.exec(name);
+      if (!m) continue;
+      if (m[1] > letter || (m[1] === letter && Number(m[2]) > number)) { letter = m[1]; number = Number(m[2]); }
+    }
+    let n = number + 1;
+    while (names.has(`Rack ${letter}-${pad(n)}`)) n++;
+    return `Rack ${letter}-${pad(n)}`;
+  }
+  const label = objectType(type).label;
+  for (let n = 1; ; n++) if (!names.has(`${label} ${n}`)) return `${label} ${n}`;
+}
+
+function clampRect(doc, rect) {
+  const width = doc.grid[0].length, height = doc.grid.length;
+  const w = Math.max(1, Math.min(rect.w, width));
+  const h = Math.max(1, Math.min(rect.h, height));
+  return {
+    x: Math.max(0, Math.min(rect.x, width - w)),
+    y: Math.max(0, Math.min(rect.y, height - h)),
+    w, h,
+  };
+}
+
+export function addObject(doc, type, rect, name = null) {
+  doc.objects = doc.objects || [];
+  const obj = {
+    id: nextId(doc.objects.map((o) => o.id), "O"),
+    type,
+    name: name || nextObjectName(doc, type),
+    ...clampRect(doc, rect),
+  };
+  doc.objects.push(obj);
+  return obj;
+}
+
+export function moveObject(doc, id, x, y) {
+  const obj = (doc.objects || []).find((o) => o.id === id);
+  if (!obj) return false;
+  Object.assign(obj, clampRect(doc, { x, y, w: obj.w, h: obj.h }));
+  return true;
+}
+
+export function resizeObject(doc, id, w, h) {
+  const obj = (doc.objects || []).find((o) => o.id === id);
+  if (!obj) return false;
+  Object.assign(obj, clampRect(doc, { x: obj.x, y: obj.y, w: Math.round(w), h: Math.round(h) }));
+  return true;
+}
+
+export function renameObject(doc, id, name) {
+  name = String(name).trim();
+  const obj = (doc.objects || []).find((o) => o.id === id);
+  if (!obj || !name) return false;
+  obj.name = name;
+  return true;
+}
+
+export function removeObject(doc, id) {
+  const before = (doc.objects || []).length;
+  doc.objects = (doc.objects || []).filter((o) => o.id !== id);
+  return doc.objects.length !== before;
+}
+
+// Turn painted shelf cells into named rack objects. Each connected block is
+// split into rectangles (scanning from the top-left); racks are lettered by
+// row band (A = top band) and numbered left to right: Rack A-01, A-02, B-01...
+// The shelf cells become floor under the new rack objects.
+export function shelvesToRacks(doc) {
+  const grid = doc.grid;
+  const height = grid.length, width = grid[0].length;
+  const used = grid.map((row) => row.map(() => false));
+  const rects = [];
+  for (let y = height - 1; y >= 0; y--) {
+    for (let x = 0; x < width; x++) {
+      if (grid[y][x] !== SHELF || used[y][x]) continue;
+      let w = 1;
+      while (x + w < width && grid[y][x + w] === SHELF && !used[y][x + w]) w++;
+      let h = 1;
+      const rowFree = (yy) => {
+        for (let xx = x; xx < x + w; xx++) if (grid[yy][xx] !== SHELF || used[yy][xx]) return false;
+        return true;
+      };
+      while (y - h >= 0 && rowFree(y - h)) h++;
+      for (let yy = y - h + 1; yy <= y; yy++) for (let xx = x; xx < x + w; xx++) used[yy][xx] = true;
+      rects.push({ x, y: y - h + 1, w, h, top: y });
+    }
+  }
+  rects.sort((a, b) => b.top - a.top || a.x - b.x);
+  const taken = new Set((doc.objects || []).map((o) => o.name));
+  let letter = "A".charCodeAt(0) - 1, number = 0, band = null;
+  const created = [];
+  for (const r of rects) {
+    if (r.top !== band) { band = r.top; letter++; number = 0; }
+    let name;
+    do { number++; name = `Rack ${String.fromCharCode(letter)}-${pad(number)}`; } while (taken.has(name));
+    taken.add(name);
+    created.push(addObject(doc, "rack", { x: r.x, y: r.y, w: r.w, h: r.h }, name));
+    for (let yy = r.y; yy < r.y + r.h; yy++) for (let xx = r.x; xx < r.x + r.w; xx++) grid[yy][xx] = FLOOR;
+  }
+  return created;
+}
+
+// Where a walkway crosses robot lanes, add crosswalks (one per crossing),
+// skipping lane cells already covered by a crosswalk. Returns the new objects.
+export function addCrosswalks(doc, cells) {
+  const covered = (x, y) => (doc.objects || []).some((o) => o.type === "crosswalk"
+    && x >= o.x && y >= o.y && x < o.x + o.w && y < o.y + o.h);
+  const open = cells.filter(([x, y]) => !covered(x, y));
+  return clusterRects(open).map((rect) => addObject(doc, "crosswalk", rect));
 }

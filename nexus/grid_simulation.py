@@ -103,6 +103,9 @@ class GridSimulation:
             angular_speed=float(sim["angular_speed"]),
             time_step=self.time_step,
         )
+        # Reach a zone's speed limit by its edge, one step's travel early so
+        # no 0.1 s step crosses the edge above the limit.
+        self.world.cap_lead = 0.5 * cs + self.world.max_speed * self.time_step
 
         self.agents: List[RobotAgent] = []
         self.meta: Dict[str, Dict[str, Any]] = {}
@@ -290,7 +293,8 @@ class GridSimulation:
         routes, _ = self._reserve(now)
 
         # 6. Motion --------------------------------------------------------
-        reached = self.world.step(routes, [a.max_speed for a in self.agents])
+        speeds, caps = self._zone_limits(routes)
+        reached = self.world.step(routes, speeds, caps)
         for agent, count in zip(self.agents, reached):
             agent.update(self.world.time)
             # The world drives straight through several cell centres per step;
@@ -362,6 +366,21 @@ class GridSimulation:
     def _station_name(self, cell: Cell) -> str:
         station = self.layout.station_cells.get(cell)
         return station["label"] if station else f"cell {list(cell)}"
+
+    def _zone_limits(self, routes: List[List[np.ndarray]]):
+        """Per robot: speed limit now (its max and any safety zone it is in),
+        and the zone cap of every cell on its route this step."""
+        speeds, caps = [], []
+        for agent, route in zip(self.agents, routes):
+            limit = agent.max_speed
+            # The cell under the robot's centre: the look-ahead caps below
+            # already brake it to the limit by the zone's edge.
+            cap = self.layout.speed_limit(self._cell(agent.state.position))
+            if cap is not None:
+                limit = min(limit, cap)
+            speeds.append(limit)
+            caps.append([self.layout.speed_limit(self._cell(point)) for point in route])
+        return speeds, caps
 
     # ------------------------------------------------------------------
     # Negotiation (existing NEXUS conflict flow)
@@ -749,6 +768,7 @@ class GridSimulation:
                 "y": round(float(agent.state.position[1]), 4),
                 "heading": round(float(agent.robot.heading), 4),
                 "speed": round(float(agent.robot.speed), 3),
+                "speed_limit": self.layout.speed_limit(self._cell(agent.state.position)),
                 "status": meta["status"],
                 "intent": agent.intent,
                 "stop_reason": agent.stop_reason,

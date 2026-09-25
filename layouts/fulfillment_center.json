@@ -17,7 +17,7 @@
     "#HHv^SS+SSS+SSS+SSS+SSS+SSS+Sv^.H#.......",
     "#HHv^SS+SSS+SSS+SSS+SSS+SSS+Sv+.H#.......",
     "#HH++<<+<<<+<<<+<<<+<<<+<<<+<++.H#.......",
-    "#HH+<<<<<<<<<<<<<<<<<<<<<<<<<<+.H#.......",
+    "#HW+<<<<<<<<<<<<<<<<<<<<<<<<<<+WW#.......",
     "#HH++>>+>>>+>>>+>>>+>>>+>>>+>++.H#.......",
     "#HHv^SS+SSS+SSS+SSS+SSS+SSS+Sv^.H#.......",
     "#HH+^SS+SSS+SSS+SSS+SSS+SSS+Sv+.H#.......",
@@ -198,6 +198,17 @@
       "goal": "C4",
       "loop": true,
       "via": []
+    }
+  ],
+  "objects": [
+    {
+      "id": "O1",
+      "type": "crosswalk",
+      "name": "Crosswalk 1",
+      "x": 3,
+      "y": 11,
+      "w": 28,
+      "h": 1
     }
   ],
   "simulation": {

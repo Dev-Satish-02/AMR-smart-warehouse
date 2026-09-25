@@ -33,6 +33,7 @@ class LaneGrid(WarehouseGrid):
         * one-way lanes are respected
         * stations are endpoints only (never driven through)
         * cell (x, y) has its centre at ((x + 0.5), (y + 0.5)) * cell_size
+        * slow cells (safety zones) cost more to cross
         * turning costs extra, so paths are straight runs joined by
           right-angle turns instead of staircases
     """
@@ -239,7 +240,11 @@ class LaneGrid(WarehouseGrid):
 
                     continue
 
-                step_cost = 1.0
+                # Slow cells (crosswalks, slow zones) cost as long as
+                # they take to cross, so A* avoids them when it can.
+                step_cost = self.layout.cost_factor(
+                    neighbour
+                )
 
                 if heading >= 0 and index != heading:
 

@@ -3,6 +3,7 @@
 // with y pointing up. The SVG y axis is flipped via sy().
 
 import { labelPlacement } from "./grid-ops.js";
+import { objectType, objectCells, speedLimit } from "./catalog.js";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -66,6 +67,12 @@ export class MapView {
     // grid[y][x], y = 0 bottom
     this.grid = [...layout.rows].reverse();
     this.stations = new Map(layout.stations.map((s) => [`${s.x},${s.y}`, s]));
+    this.objects = layout.objects || [];
+    // Cells under blocking equipment/racks are not drivable.
+    this.blocked = new Set();
+    for (const obj of this.objects) {
+      if (objectType(obj.type).blocking) for (const [x, y] of objectCells(obj)) this.blocked.add(`${x},${y}`);
+    }
 
     this.svg.innerHTML = "";
     this.robotNodes.clear();
@@ -73,8 +80,12 @@ export class MapView {
 
     this.gFloor = el("g", {}, this.svg);
     this.gCells = el("g", {}, this.svg);
+    this.gAreas = el("g", {}, this.svg);
     this.gGraph = el("g", { "data-layer": "graph" }, this.svg);
     this.gZones = el("g", {}, this.svg);
+    this.gSafety = el("g", {}, this.svg);
+    this.gEquipment = el("g", {}, this.svg);
+    this.gObjectLabels = el("g", { "data-layer": "labels" }, this.svg);
     this.gStations = el("g", {}, this.svg);
     this.gStationLabels = el("g", { "data-layer": "labels" }, this.svg);
     this.gReserved = el("g", { "data-layer": "reservations" }, this.svg);
@@ -89,6 +100,7 @@ export class MapView {
     this._drawCells();
     this._drawGraph();
     this._drawZones();
+    this._drawObjects();
     this._drawStations();
     this._applyLayers();
     if (fit || !this.view) this.fit();
@@ -111,7 +123,8 @@ export class MapView {
 
   isDrivable(x, y) {
     const c = this._char(x, y);
-    return c !== null && (LANE_CHARS.has(c) || this.stations.has(`${x},${y}`));
+    if (c === null || this.blocked.has(`${x},${y}`)) return false;
+    return LANE_CHARS.has(c) || this.stations.has(`${x},${y}`);
   }
 
   moveAllowed(ax, ay, bx, by) {
@@ -138,7 +151,10 @@ export class MapView {
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const c = this.grid[y][x];
-        if (LANE_CHARS.has(c) || this.stations.has(`${x},${y}`)) {
+        if (this.blocked.has(`${x},${y}`)) continue; // drawn as equipment
+        if (c === "W") {
+          this._drawWalkway(x, y);
+        } else if (LANE_CHARS.has(c) || this.stations.has(`${x},${y}`)) {
           el("rect", { ...this.cellRect(x, y, 0.02), rx: 0.06, fill: "var(--lane)" }, this.gCells);
         } else if (c === "S") {
           el("rect", { ...this.cellRect(x, y, 0.07), rx: 0.08, fill: `url(#${this.uid}-shelf)`, stroke: "var(--shelf-line)", "stroke-width": 0.03 }, this.gCells);
@@ -148,6 +164,134 @@ export class MapView {
           el("rect", { ...this.cellRect(x, y, 0), fill: `url(#${this.uid}-hatch)` }, this.gCells);
         }
       }
+    }
+  }
+
+  // Pedestrian walkway: lighter floor with safety-yellow edge lines where
+  // it borders anything that is not walkway.
+  _drawWalkway(x, y) {
+    const r = this.cellRect(x, y, 0);
+    el("rect", { ...r, fill: "var(--walkway)" }, this.gCells);
+    const inset = 0.07;
+    const edges = [
+      [[0, 1], [r.x, r.y + inset, r.x + r.width, r.y + inset]],
+      [[0, -1], [r.x, r.y + r.height - inset, r.x + r.width, r.y + r.height - inset]],
+      [[-1, 0], [r.x + inset, r.y, r.x + inset, r.y + r.height]],
+      [[1, 0], [r.x + r.width - inset, r.y, r.x + r.width - inset, r.y + r.height]],
+    ];
+    for (const [[dx, dy], [x1, y1, x2, y2]] of edges) {
+      if (this._char(x + dx, y + dy) === "W") continue;
+      el("line", { x1, y1, x2, y2, stroke: "var(--walkway-edge)", "stroke-width": 0.06 }, this.gCells);
+    }
+  }
+
+  // Racks, equipment, labelled areas and safety zones.
+  _drawObjects() {
+    for (const obj of this.objects) {
+      const info = objectType(obj.type);
+      const rect = {
+        x: obj.x * this.cs,
+        y: this.worldH - (obj.y + obj.h) * this.cs,
+        width: obj.w * this.cs,
+        height: obj.h * this.cs,
+      };
+      const family = info.family;
+      if (family === "area") this._drawArea(obj, rect);
+      else if (family === "zone") this._drawSafetyZone(obj, rect);
+      else this._drawEquipment(obj, rect, family);
+    }
+  }
+
+  _inset(rect, d) {
+    return { x: rect.x + d, y: rect.y + d, width: Math.max(0.05, rect.width - 2 * d), height: Math.max(0.05, rect.height - 2 * d) };
+  }
+
+  // Icon + name centred along the rectangle's long axis, sized to fit.
+  _objectLabel(obj, rect, { icon = true, color = "var(--object-text)", max = 0.4, plate = false } = {}) {
+    const horizontal = rect.width >= rect.height;
+    const long = horizontal ? rect.width : rect.height;
+    const short = horizontal ? rect.height : rect.width;
+    const text = obj.name || objectType(obj.type).label;
+    const iconSize = icon ? Math.min(0.55, short * 0.6) : 0;
+    const gap = icon ? iconSize * 0.3 : 0;
+    const size = Math.min(max, short * 0.34, (long * 0.88 - iconSize - gap) / Math.max(text.length * 0.58, 1));
+    const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2;
+    const g = el("g", { transform: `translate(${cx} ${cy})${horizontal ? "" : " rotate(-90)"}` }, this.gObjectLabels);
+    if (size < 0.13) {
+      if (icon && iconSize >= 0.2) el("use", { href: `#ob-${obj.type}`, x: -iconSize / 2, y: -iconSize / 2, width: iconSize, height: iconSize, color }, g);
+      return;
+    }
+    const textWidth = text.length * size * 0.58;
+    const total = iconSize + gap + textWidth;
+    const left = -total / 2;
+    if (plate) {
+      el("rect", { x: left - 0.1, y: -Math.max(iconSize, size) / 2 - 0.08, width: total + 0.2, height: Math.max(iconSize, size) + 0.16, rx: 0.1, fill: "var(--floor)", "fill-opacity": 0.82 }, g);
+    }
+    if (icon) el("use", { href: `#ob-${obj.type}`, x: left, y: -iconSize / 2, width: iconSize, height: iconSize, color }, g);
+    const t = el("text", { x: left + iconSize + gap, y: size * 0.35, "font-size": size, "font-weight": 700, fill: color }, g);
+    t.textContent = text;
+  }
+
+  _drawEquipment(obj, rect, family) {
+    const r = this._inset(rect, 0.06);
+    if (obj.type === "rack" || family === "storage") {
+      el("rect", { ...r, rx: 0.08, fill: `url(#${this.uid}-shelf)`, stroke: "var(--storage-stroke)", "stroke-width": 0.05 }, this.gEquipment);
+      this._objectLabel(obj, r, { icon: false, plate: true, max: 0.34 });
+      return;
+    }
+    const fill = family === "production" ? "var(--production-fill)" : "var(--facility-fill)";
+    const stroke = family === "production" ? "var(--production-stroke)" : "var(--facility-stroke)";
+    el("rect", { ...r, rx: 0.14, fill, stroke, "stroke-width": 0.06 }, this.gEquipment);
+    if (obj.type === "conveyor") {
+      const horizontal = r.width >= r.height;
+      const n = Math.floor((horizontal ? r.width : r.height) / 0.5);
+      for (let i = 1; i < n; i++) {
+        const t = (horizontal ? r.x : r.y) + i * 0.5;
+        el("line", horizontal
+          ? { x1: t, y1: r.y + 0.08, x2: t, y2: r.y + r.height - 0.08 }
+          : { x1: r.x + 0.08, y1: t, x2: r.x + r.width - 0.08, y2: t },
+        this.gEquipment).setAttribute("stroke", "var(--production-stroke)");
+      }
+    }
+    this._objectLabel(obj, r, { plate: obj.type === "conveyor" });
+  }
+
+  _drawArea(obj, rect) {
+    el("rect", { ...rect, fill: "var(--area-fill)", stroke: "var(--area-stroke)", "stroke-width": 0.05, "stroke-dasharray": "0.3 0.18" }, this.gAreas);
+    // Name tag in the top-left corner so lanes through the area stay readable.
+    const size = Math.min(0.34, rect.height * 0.3);
+    const text = obj.name || objectType(obj.type).label;
+    if (size < 0.14 || text.length * size * 0.58 + size * 1.4 > rect.width) {
+      this._objectLabel(obj, this._inset(rect, 0.1), { color: "var(--area-stroke)", max: 0.3 });
+      return;
+    }
+    const g = el("g", { transform: `translate(${rect.x + 0.14} ${rect.y + 0.14})` }, this.gObjectLabels);
+    el("use", { href: `#ob-${obj.type}`, x: 0, y: 0, width: size * 1.1, height: size * 1.1, color: "var(--area-stroke)" }, g);
+    const t = el("text", { x: size * 1.35, y: size * 0.88, "font-size": size, "font-weight": 700, "letter-spacing": 0.02, fill: "var(--area-stroke)" }, g);
+    t.textContent = text.toUpperCase();
+  }
+
+  _drawSafetyZone(obj, rect) {
+    if (obj.type === "crosswalk") {
+      // Zebra bars across the short side, repeated along the long side.
+      const horizontal = rect.width >= rect.height;
+      const long = horizontal ? rect.width : rect.height;
+      const bar = 0.2, pitch = 0.4;
+      for (let t = (long % pitch) / 2 + 0.1; t + bar <= long + 1e-6; t += pitch) {
+        el("rect", horizontal
+          ? { x: rect.x + t, y: rect.y + 0.08, width: bar, height: rect.height - 0.16 }
+          : { x: rect.x + 0.08, y: rect.y + t, width: rect.width - 0.16, height: bar },
+        this.gSafety).setAttribute("fill", "var(--crosswalk)");
+      }
+      return;
+    }
+    el("rect", { ...rect, fill: "rgba(201,162,39,0.06)", stroke: "var(--zone-slow)", "stroke-width": 0.06, "stroke-dasharray": "0.24 0.14" }, this.gSafety);
+    const limit = speedLimit(obj);
+    const text = `${obj.name || "Slow zone"}${limit ? ` · ≤ ${limit} m/s` : ""}`;
+    const size = Math.min(0.3, rect.height * 0.35);
+    if (size >= 0.14 && text.length * size * 0.58 + 0.3 < rect.width) {
+      const t = el("text", { x: rect.x + 0.14, y: rect.y + rect.height - 0.14, "font-size": size, "font-weight": 700, fill: "var(--zone-slow)" }, this.gObjectLabels);
+      t.textContent = text;
     }
   }
 
