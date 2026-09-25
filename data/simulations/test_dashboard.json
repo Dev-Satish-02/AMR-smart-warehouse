@@ -1,0 +1,82 @@
+{
+  "robots": [
+    {
+      "battery": 100.0,
+      "goal": [
+        28.0,
+        10.0
+      ],
+      "heading": 0.0,
+      "id": "R1",
+      "max_speed": 0.8,
+      "start": [
+        2.0,
+        10.0
+      ],
+      "task_id": "T1"
+    },
+    {
+      "battery": 100.0,
+      "goal": [
+        2.0,
+        10.0
+      ],
+      "heading": 3.14159,
+      "id": "R4",
+      "max_speed": 0.8,
+      "start": [
+        28.0,
+        10.0
+      ],
+      "task_id": "T4"
+    }
+  ],
+  "simulation": {
+    "clearance_distance": 1.5,
+    "dynamic_obstacle_radius": 1.0,
+    "hard_safety_distance": 0.7,
+    "max_steps": 900,
+    "strategy": "nexus",
+    "time_step": 0.1
+  },
+  "tasks": [
+    {
+      "assigned_robot": "R1",
+      "dropoff": [
+        28.0,
+        10.0
+      ],
+      "id": "T1",
+      "pickup": [
+        2.0,
+        10.0
+      ],
+      "priority": 1,
+      "status": "PENDING"
+    },
+    {
+      "assigned_robot": "R4",
+      "dropoff": [
+        2.0,
+        10.0
+      ],
+      "id": "T4",
+      "pickup": [
+        28.0,
+        10.0
+      ],
+      "priority": 1,
+      "status": "PENDING"
+    }
+  ],
+  "warehouse": {
+    "charging_stations": [],
+    "height": 20.0,
+    "name": "Warehouse A",
+    "obstacles": [],
+    "path": "configs/demo_warehouse.yaml",
+    "resolution": 0.5,
+    "stations": [],
+    "width": 30.0
+  }
+}

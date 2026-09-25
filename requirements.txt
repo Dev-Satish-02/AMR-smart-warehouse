@@ -5,3 +5,6 @@ scipy
 matplotlib
 pyyaml
 pandas
+fastapi
+uvicorn
+websockets

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NEXUS Control Room</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 4h3.5v16H7zM13.5 4H17v16h-3.5z" fill="currentColor"/></symbol>
+      <symbol id="i-step" viewBox="0 0 24 24"><path d="M6 5v14l9-7zM16.5 5H19v14h-2.5z" fill="currentColor"/></symbol>
+      <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v5h5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3 2 8l10 5 10-5zM2 13l10 5 10-5M2 17.5l10 5 10-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+      <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <!-- status icons -->
+      <symbol id="s-moving" viewBox="0 0 24 24"><path d="M5 12h12M12 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="s-turning" viewBox="0 0 24 24"><path d="M6 19v-6a5 5 0 0 1 5-5h8M15 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="s-waiting" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+      <symbol id="s-yield" viewBox="0 0 24 24"><path d="M3 5h18L12 20z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></symbol>
+      <symbol id="s-backoff" viewBox="0 0 24 24"><path d="M19 12H7M12 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="s-reroute" viewBox="0 0 24 24"><path d="M4 18c0-6 4-7 8-7h7M15 7l4 4-4 4M4 6h5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="s-arrived" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="s-docked" viewBox="0 0 24 24"><path d="M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="s-error" viewBox="0 0 24 24"><path d="M12 3 2 20h20zM12 10v4M12 17v.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="s-idle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
+      <!-- station icons -->
+      <symbol id="st-loading" viewBox="0 0 24 24"><path d="M12 3v10M7.5 8.5 12 13l4.5-4.5M4 16v4h16v-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="st-unloading" viewBox="0 0 24 24"><path d="M12 13V3M7.5 7.5 12 3l4.5 4.5M4 16v4h16v-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="st-workstation" viewBox="0 0 24 24"><path d="M3.5 7.5 12 3.5l8.5 4v9l-8.5 4-8.5-4zM3.5 7.5 12 11.5l8.5-4M12 11.5v9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="st-charging" viewBox="0 0 24 24"><path d="M13.5 2.5 5 13.5h6l-1 8 8.5-11h-6z" fill="currentColor"/></symbol>
+      <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.6" fill="currentColor"/><path d="M8 22l1.5-8L7 15V10.5L12 8.5l5 2V15l-2.5-1L16 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+    </defs>
+  </svg>
+
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32"><rect x="3" y="3" width="26" height="26" rx="7" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M10 22V10l12 12V10" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div>
+          <div class="brand-name">NEXUS</div>
+          <div class="brand-sub">Decentralized fleet coordination</div>
+        </div>
+      </div>
+
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-mode="live" role="tab" aria-selected="true">Live</button>
+        <button class="tab" data-mode="editor" role="tab" aria-selected="false" disabled title="Layout editor — next milestone">Editor</button>
+      </nav>
+
+      <div class="topbar-right">
+        <label class="select">
+          <span class="select-label">Layout</span>
+          <select id="layout-select"></select>
+        </label>
+        <div class="conn" id="conn"><span class="dot"></span><span class="conn-label">Connecting…</span></div>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="stage">
+        <div class="stage-head">
+          <div>
+            <h1 id="layout-title">—</h1>
+            <div class="stage-meta" id="layout-meta"></div>
+          </div>
+          <div class="sim-status" id="sim-status"></div>
+        </div>
+
+        <div class="issues" id="issues" hidden></div>
+
+        <div class="map-card">
+          <div class="map-bar">
+            <div class="legend" id="legend"></div>
+            <div class="map-tools">
+              <button class="icon-btn" id="btn-fit" title="Fit to view (F)"><svg><use href="#i-fit"/></svg></button>
+              <div class="layers-wrap">
+                <button class="icon-btn" id="btn-layers" title="Layers"><svg><use href="#i-layers"/></svg></button>
+                <div class="layers-pop" id="layers-pop" hidden>
+                  <label><input type="checkbox" data-layer="graph" checked /> Lane graph</label>
+                  <label><input type="checkbox" data-layer="paths" checked /> Planned paths</label>
+                  <label><input type="checkbox" data-layer="reservations" checked /> Cell reservations</label>
+                  <label><input type="checkbox" data-layer="conflicts" checked /> Conflicts</label>
+                  <label><input type="checkbox" data-layer="labels" checked /> Station labels</label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="map-wrap" id="map-wrap">
+            <svg id="map" class="map" xmlns="http://www.w3.org/2000/svg"></svg>
+          </div>
+
+          <div class="transport">
+            <button class="t-btn" id="btn-reset" title="Reset (R)"><svg><use href="#i-reset"/></svg></button>
+            <button class="t-btn primary" id="btn-play" title="Play / pause (Space)"><svg><use href="#i-play"/></svg></button>
+            <button class="t-btn" id="btn-step" title="Step 0.1 s (→)"><svg><use href="#i-step"/></svg></button>
+            <div class="clock"><span class="clock-label">SIM TIME</span><span class="clock-value" id="clock">0.0 s</span></div>
+            <div class="speed" id="speed" role="radiogroup" aria-label="Simulation speed"></div>
+            <div class="hint">Click a robot to follow it · scroll to zoom · drag to pan</div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side">
+        <section class="kpis" id="kpis"></section>
+
+        <section class="card fleet-card">
+          <div class="card-head">
+            <h2>Fleet</h2>
+            <span class="card-hint" id="fleet-summary"></span>
+          </div>
+          <div class="fleet" id="fleet"></div>
+        </section>
+
+        <section class="card events-card">
+          <div class="card-head">
+            <h2>Coordination log</h2>
+            <span class="card-hint">P2P · negotiation · reservations</span>
+          </div>
+          <ol class="events" id="events"></ol>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+  <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

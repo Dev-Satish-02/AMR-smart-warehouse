@@ -1,0 +1,210 @@
+{
+  "name": "Fulfillment Center (8 robots)",
+  "width": 34,
+  "height": 22,
+  "rows": [
+    "##################################",
+    "#....HHHHHHHHH...................#",
+    "#....HHHHHHHHH...................#",
+    "#..+<<<+<<<+<<<+<<<+<<<+<<<+<<+..#",
+    "#..+...+...+...+...+...+...+..+..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#H.++++++++++++++++++++++++++++..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#H.+.SS+SSS+SSS+SSS+SSS+SSS+S.+..#",
+    "#..+...+...+...+...+...+...+..+..#",
+    "#..+>>>+>>>+>>>+>>>+>>>+>>>+>>+..#",
+    "#................................#",
+    "##################################"
+  ],
+  "stations": [
+    {
+      "id": "L1",
+      "type": "loading",
+      "x": 2,
+      "y": 4,
+      "label": "Dock 1"
+    },
+    {
+      "id": "U1",
+      "type": "unloading",
+      "x": 31,
+      "y": 4,
+      "label": "Ship 1"
+    },
+    {
+      "id": "L2",
+      "type": "loading",
+      "x": 2,
+      "y": 8,
+      "label": "Dock 2"
+    },
+    {
+      "id": "U2",
+      "type": "unloading",
+      "x": 31,
+      "y": 8,
+      "label": "Ship 2"
+    },
+    {
+      "id": "L3",
+      "type": "loading",
+      "x": 2,
+      "y": 12,
+      "label": "Dock 3"
+    },
+    {
+      "id": "U3",
+      "type": "unloading",
+      "x": 31,
+      "y": 12,
+      "label": "Ship 3"
+    },
+    {
+      "id": "L4",
+      "type": "loading",
+      "x": 2,
+      "y": 16,
+      "label": "Dock 4"
+    },
+    {
+      "id": "U4",
+      "type": "unloading",
+      "x": 31,
+      "y": 16,
+      "label": "Ship 4"
+    },
+    {
+      "id": "W1",
+      "type": "workstation",
+      "x": 19,
+      "y": 19,
+      "label": "Pick 1"
+    },
+    {
+      "id": "W2",
+      "type": "workstation",
+      "x": 23,
+      "y": 19,
+      "label": "Pick 2"
+    },
+    {
+      "id": "W3",
+      "type": "workstation",
+      "x": 27,
+      "y": 19,
+      "label": "Pick 3"
+    },
+    {
+      "id": "C1",
+      "type": "charging",
+      "x": 7,
+      "y": 1,
+      "label": "Charge 1"
+    },
+    {
+      "id": "C2",
+      "type": "charging",
+      "x": 11,
+      "y": 1,
+      "label": "Charge 2"
+    },
+    {
+      "id": "C3",
+      "type": "charging",
+      "x": 15,
+      "y": 1,
+      "label": "Charge 3"
+    },
+    {
+      "id": "C4",
+      "type": "charging",
+      "x": 19,
+      "y": 1,
+      "label": "Charge 4"
+    }
+  ],
+  "robots": [
+    {
+      "id": "R1",
+      "start": "L1",
+      "goal": "U3",
+      "loop": true,
+      "via": []
+    },
+    {
+      "id": "R2",
+      "start": "L2",
+      "goal": "W2",
+      "loop": true,
+      "via": []
+    },
+    {
+      "id": "R3",
+      "start": "U1",
+      "goal": "L3",
+      "loop": true,
+      "via": []
+    },
+    {
+      "id": "R4",
+      "start": "U2",
+      "goal": "L4",
+      "loop": true,
+      "via": []
+    },
+    {
+      "id": "R5",
+      "start": "C1",
+      "goal": "W1",
+      "loop": true,
+      "via": []
+    },
+    {
+      "id": "R6",
+      "start": "C2",
+      "goal": "U4",
+      "loop": true,
+      "via": [
+        [
+          15,
+          10
+        ]
+      ]
+    },
+    {
+      "id": "R7",
+      "start": "C3",
+      "goal": "L2",
+      "loop": true,
+      "via": []
+    },
+    {
+      "id": "R8",
+      "start": "W3",
+      "goal": "C4",
+      "loop": true,
+      "via": []
+    }
+  ],
+  "version": 1,
+  "cell_size": 1.0,
+  "simulation": {
+    "time_step": 0.1,
+    "max_time": 600.0,
+    "max_speed": 1.0,
+    "acceleration": 1.2,
+    "angular_speed": 2.0,
+    "turn_penalty": 1.0,
+    "reservation_lookahead": 3
+  }
+}

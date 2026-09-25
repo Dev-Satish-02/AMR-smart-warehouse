@@ -1,0 +1,120 @@
+{
+  "name": "Cross-Traffic (6 robots, imported)",
+  "width": 30,
+  "height": 20,
+  "rows": [
+    "++++++++++++++++++++++++++++++",
+    "++++++++++++++++++++++++++++++",
+    "++++++++++++++++++++++++++++++",
+    "++++++++++++++++++++++++++++++",
+    "++++++++++++++++++++++++++++++",
+    "++++++++++SS+++++++++SS+++++++",
+    "++++++++++SS+++++++++SS+++++++",
+    "++++SSSSSSSS+++SSSSSSSS+++++++",
+    "++++SSSSSSS++++SSSSSSS++++++++",
+    "+++++++++++++SSSS+++++++++++++",
+    "++++++++++++SSSSSS++++++++++++",
+    "++++++++++++SS++SS++++++++++++",
+    "++++++++++SSSS++SS+++SS+++++++",
+    "++++++++++SS+++++++++SS+++++++",
+    "++++SSSSSSSS+++SSSSSSSS+++++++",
+    "++++SSSSSSS++++SSSSSSS++++++++",
+    "++++++++++++++++++++++++++++++",
+    "++++++++++++++++++++++++++++++",
+    "++++++++++++++++++++++++++++++",
+    "++++++++++++++++++++++++++++++"
+  ],
+  "stations": [
+    {
+      "id": "P1",
+      "type": "workstation",
+      "x": 2,
+      "y": 3,
+      "label": "P1"
+    },
+    {
+      "id": "P2",
+      "type": "workstation",
+      "x": 28,
+      "y": 17,
+      "label": "P2"
+    },
+    {
+      "id": "P3",
+      "type": "workstation",
+      "x": 2,
+      "y": 7,
+      "label": "P3"
+    },
+    {
+      "id": "P4",
+      "type": "workstation",
+      "x": 28,
+      "y": 13,
+      "label": "P4"
+    },
+    {
+      "id": "P5",
+      "type": "workstation",
+      "x": 2,
+      "y": 11,
+      "label": "P5"
+    },
+    {
+      "id": "P6",
+      "type": "workstation",
+      "x": 28,
+      "y": 9,
+      "label": "P6"
+    }
+  ],
+  "robots": [
+    {
+      "id": "R1",
+      "start": "P1",
+      "goal": "P2",
+      "via": []
+    },
+    {
+      "id": "R2",
+      "start": "P3",
+      "goal": "P4",
+      "via": []
+    },
+    {
+      "id": "R3",
+      "start": "P5",
+      "goal": "P6",
+      "via": []
+    },
+    {
+      "id": "R4",
+      "start": "P2",
+      "goal": "P1",
+      "via": []
+    },
+    {
+      "id": "R5",
+      "start": "P4",
+      "goal": "P3",
+      "via": []
+    },
+    {
+      "id": "R6",
+      "start": "P6",
+      "goal": "P5",
+      "via": []
+    }
+  ],
+  "simulation": {
+    "time_step": 0.1,
+    "max_time": 600.0,
+    "max_speed": 1.0,
+    "acceleration": 1.2,
+    "angular_speed": 2.0,
+    "turn_penalty": 1.0,
+    "reservation_lookahead": 3
+  },
+  "version": 1,
+  "cell_size": 1.0
+}

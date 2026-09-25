@@ -6,7 +6,18 @@ from algorithms.astar import (
 
 class NEXUSPlanner:
 
-    def __init__(self):
+    def __init__(
+        self,
+        grid=None,
+    ):
+
+        # Any WarehouseGrid-compatible grid (e.g. LaneGrid built from
+        # a layout). Default: the original hardcoded warehouse.
+        if grid is not None:
+
+            self.grid = grid
+
+            return
 
         config = GridConfig(
             width=30.0,

@@ -1,0 +1,50 @@
+world:
+  height: 20
+  width: 30
+  step_time: 0.1
+  sample_time: 0.1
+  offset: [0, 0]
+  control_mode: "auto"
+
+robot:
+  - number: 2
+
+    distribution:
+      name: "manual"
+
+    kinematics:
+      name: "diff"
+
+    shape:
+      - name: "circle"
+        radius: 0.35
+
+    state:
+      - [2, 10, 0]
+      - [28, 10, 3.14159]
+
+    goal:
+      - [28, 10, 0]
+      - [2, 10, 0]
+
+    color:
+      - "royalblue"
+      - "red"
+
+    vel_min: [-1.5, -2.0]
+    vel_max: [1.5, 2.0]
+
+    arrive_mode: "position"
+    goal_threshold: 0.4
+
+    behavior:
+      name: "dash"
+
+    plot:
+      show_trail: true
+      show_goal: true
+      trail_fill: true
+      trail_alpha: 0.2
+      show_trajectory: false
+
+obstacle: []
