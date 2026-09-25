@@ -1,25 +1,41 @@
-// Layout editor: paint lanes, roads, shelves, walls and human-only areas on
-// the warehouse grid, validate live, and save straight to layouts/*.json.
+// Layout editor: paint lanes, roads, shelves, walls and human-only areas;
+// place stations; add robots with start/goal and via-point routes; preview
+// every robot's A* route live; save straight to layouts/*.json.
 
 import { MapView, el } from "./map.js";
 import * as ops from "./grid-ops.js";
+import * as docs from "./doc-ops.js";
 
 const $ = (sel) => document.querySelector(sel);
 
 const TOOLS = {
   pan: { label: "Pan" },
+  select: { label: "Select" },
   road: { label: "One-way road", color: "#8fb8ff" },
   lane: { label: "Junction (two-way lane)", char: ops.LANE, color: "#8fb8ff" },
   shelf: { label: "Shelf", char: ops.SHELF, color: "#6b7482" },
   wall: { label: "Wall", char: ops.WALL, color: "#9aa0aa" },
   human: { label: "Human-only area", char: ops.HUMAN, color: "#c9a227" },
   erase: { label: "Eraser", char: ops.FLOOR, color: "#d03b3b" },
+  station: { label: "Station" },
+  route: { label: "Route" },
 };
-const TOOL_KEYS = { h: "pan", 1: "road", 2: "lane", 3: "shelf", 4: "wall", 5: "human", 6: "erase" };
+const PAINT_TOOLS = new Set(["road", "lane", "shelf", "wall", "human", "erase"]);
+const TOOL_KEYS = { h: "pan", v: "select", 1: "road", 2: "lane", 3: "shelf", 4: "wall", 5: "human", 6: "erase", 7: "station", 8: "route" };
 
 const CELL_NAMES = {
   ".": "Floor", "#": "Wall", S: "Shelf", H: "Human-only", "+": "Junction (two-way)",
   ">": "One-way lane →", "<": "One-way lane ←", "^": "One-way lane ↑", v: "One-way lane ↓",
+};
+
+// Same fixed-order categorical palette as the live view (nexus/layout.py).
+const ROBOT_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
+
+const DEFAULT_HINT = "Drag to paint a straight run · Shift-drag fills a rectangle · middle-drag or Space to pan · scroll to zoom";
+const TOOL_HINTS = {
+  select: "Click a station or robot to edit it · drag robot starts, goals, via-points and stations to move them (robots on top)",
+  station: "Click a cell to place a station of the chosen type · drag an existing station to move it",
+  route: "Click lane cells to add via-points in order · click a via-point to remove it",
 };
 
 const MAX_UNDO = 100;
@@ -27,6 +43,8 @@ const MAX_UNDO = 100;
 export function slugify(text) {
   return String(text).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "layout";
 }
+
+const same = (a, b) => !!a && !!b && a[0] === b[0] && a[1] === b[1];
 
 export class Editor {
   constructor({ onRun, onSaved, onOpened = () => {}, toast }) {
@@ -44,11 +62,16 @@ export class Editor {
     this.redoStack = [];
     this.tool = "road";
     this.lanes = 2;
+    this.stationType = "loading";
     this.lastDir = [1, 0];
     this.stroke = null;
+    this.drag = null;
+    this.pick = null;        // { kind: "add" | "field", stage, start, robotId, field }
+    this.selection = null;   // { kind: "robot" | "station", id }
     this.hover = null;
     this.highlight = [];
     this.issues = [];
+    this.routes = {};
     this.knownFiles = [];
     this._validateTimer = null;
     this._validateSeq = 0;
@@ -74,13 +97,16 @@ export class Editor {
       cell_size: layout.cell_size || 1,
       grid: ops.gridFromRows(layout.rows),
       stations: structuredClone(layout.stations || []),
-      robots: structuredClone(layout.robots || []),
+      robots: structuredClone(layout.robots || []).map((r) => ({ ...r, via: r.via || [] })),
       simulation: structuredClone(layout.simulation || {}),
     };
     this.file = file;
     this.undoStack = [];
     this.redoStack = [];
     this.highlight = [];
+    this.routes = {};
+    this.selection = null;
+    this.pick = null;
     this.setDirty(file === null);
     this.render({ fit: true });
     this.validateSoon(0);
@@ -112,6 +138,19 @@ export class Editor {
     return window.confirm(`Discard unsaved changes to "${this.doc.name}"?`);
   }
 
+  robotColor(robot) {
+    const index = this.doc.robots.indexOf(robot);
+    return robot.color || ROBOT_COLORS[Math.max(index, 0) % ROBOT_COLORS.length];
+  }
+
+  selectedRobot() {
+    return this.selection?.kind === "robot" ? this.doc.robots.find((r) => r.id === this.selection.id) || null : null;
+  }
+
+  selectedStation() {
+    return this.selection?.kind === "station" ? this.doc.stations.find((s) => s.id === this.selection.id) || null : null;
+  }
+
   // ================================================================ undo
 
   snapshot() {
@@ -119,11 +158,11 @@ export class Editor {
   }
 
   restore(snap) {
-    const s = JSON.parse(snap);
-    Object.assign(this.doc, s);
+    Object.assign(this.doc, JSON.parse(snap));
   }
 
   commit(before, { fit = false } = {}) {
+    if (before === this.snapshot()) { this.render(); return; }
     this.undoStack.push(before);
     if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
     this.redoStack = [];
@@ -132,40 +171,46 @@ export class Editor {
     this.validateSoon();
   }
 
-  undo() {
-    if (!this.undoStack.length) return;
-    this.redoStack.push(this.snapshot());
-    const sizeBefore = `${this.doc.grid[0].length}x${this.doc.grid.length}`;
-    this.restore(this.undoStack.pop());
+  // Apply fn to the document as one undoable change.
+  change(fn, options) {
+    const before = this.snapshot();
+    const result = fn();
+    this.commit(before, options);
+    return result;
+  }
+
+  _history(from, to) {
+    if (!from.length) return;
+    to.push(this.snapshot());
+    const size = () => `${this.doc.grid[0].length}x${this.doc.grid.length}`;
+    const sizeBefore = size();
+    this.restore(from.pop());
     this.setDirty(true);
-    this.render({ fit: sizeBefore !== `${this.doc.grid[0].length}x${this.doc.grid.length}` });
+    this.render({ fit: sizeBefore !== size() });
     this.validateSoon();
   }
 
-  redo() {
-    if (!this.redoStack.length) return;
-    this.undoStack.push(this.snapshot());
-    const sizeBefore = `${this.doc.grid[0].length}x${this.doc.grid.length}`;
-    this.restore(this.redoStack.pop());
-    this.setDirty(true);
-    this.render({ fit: sizeBefore !== `${this.doc.grid[0].length}x${this.doc.grid.length}` });
-    this.validateSoon();
-  }
+  undo() { this._history(this.undoStack, this.redoStack); }
+  redo() { this._history(this.redoStack, this.undoStack); }
 
   // ================================================================ render
 
   render({ fit = false } = {}) {
+    // Drop a selection whose object no longer exists (undo, delete).
+    if (this.selection && !this.selectedRobot() && !this.selectedStation()) this.selection = null;
+
     const layout = this.toLayout();
     this.map.setLayout(layout, { fit });
+    this.gRoutes = el("g", {}, this.map.gOverlay);
     this.gHighlight = el("g", {}, this.map.gOverlay);
+    this.gSelection = el("g", {}, this.map.gOverlay);
     this.gPreview = el("g", {}, this.map.gOverlay);
     this.gHover = el("g", {}, this.map.gOverlay);
+    // Routes sit under the robot markers.
+    this.map.gMarkers.parentNode.insertBefore(this.gRoutes, this.map.gMarkers);
 
-    const stationCell = new Map(this.doc.stations.map((s) => [s.id, [s.x, s.y]]));
-    const resolve = (ref) => (typeof ref === "string" ? stationCell.get(ref) : ref) || null;
-    const colors = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
-    this.map.drawRobotMarkers(this.doc.robots.map((r, i) => ({
-      id: r.id, color: r.color || colors[i % colors.length], start: resolve(r.start), goal: resolve(r.goal),
+    this.map.drawRobotMarkers(this.doc.robots.map((r) => ({
+      id: r.id, color: this.robotColor(r), start: docs.resolveRef(this.doc, r.start), goal: docs.resolveRef(this.doc, r.goal),
     })));
 
     $("#ed-name").value = this.doc.name;
@@ -185,11 +230,19 @@ export class Editor {
       stat(this.doc.stations.length, "stations"),
       stat(this.doc.robots.length, "robots"),
     ].join("");
+    this._drawRoutes();
     this._drawHighlight();
+    this._drawSelection();
+    this._renderFleet();
   }
 
   _cellRect(x, y, inset = 0) {
     return this.map.cellRect(x, y, inset);
+  }
+
+  _point(cell) {
+    const [x, y] = this.map.cellCenter(cell[0], cell[1]);
+    return [x, this.map.sy(y)];
   }
 
   _drawHighlight() {
@@ -201,13 +254,275 @@ export class Editor {
     }
   }
 
+  // Planned A* routes (from the last validation): faint for every robot,
+  // bold with direction arrows and numbered via-points for the selected one.
+  _drawRoutes() {
+    if (!this.gRoutes) return;
+    this.gRoutes.innerHTML = "";
+    const selected = this.selectedRobot();
+    const ordered = [...this.doc.robots].sort((a, b) => (a === selected) - (b === selected));
+    for (const robot of ordered) {
+      const route = this.routes[robot.id];
+      const color = this.robotColor(robot);
+      const isSel = robot === selected;
+      const dim = selected && !isSel;
+      const line = (cells, dashed) => {
+        if (!cells || cells.length < 2) return;
+        el("polyline", {
+          points: cells.map((c) => this._point(c).join(",")).join(" "),
+          fill: "none", stroke: color, "stroke-width": isSel ? 0.13 : 0.08,
+          "stroke-opacity": isSel ? 0.95 : dim ? 0.18 : 0.5,
+          "stroke-linejoin": "round", "stroke-linecap": "round",
+          "stroke-dasharray": dashed ? "0.3 0.2" : null,
+        }, this.gRoutes);
+      };
+      if (route) {
+        line(route.outbound, false);
+        if (isSel) line(route.back, true);
+        if (isSel && route.outbound) {
+          for (let i = 1; i < route.outbound.length - 1; i += 3) {
+            const a = route.outbound[i], b = route.outbound[i + 1];
+            const [x, y] = this._point(a);
+            const angle = Math.atan2(-(b[1] - a[1]), b[0] - a[0]) * 180 / Math.PI;
+            el("path", {
+              d: "M-0.12 -0.15 L0.08 0 L-0.12 0.15", transform: `translate(${x} ${y}) rotate(${angle})`,
+              fill: "none", stroke: "#fff", "stroke-width": 0.06, "stroke-linecap": "round", "stroke-linejoin": "round",
+            }, this.gRoutes);
+          }
+        }
+      }
+      (robot.via || []).forEach((v, index) => {
+        const [x, y] = this._point(v);
+        const size = isSel ? 0.22 : 0.14;
+        el("rect", {
+          x: x - size, y: y - size, width: 2 * size, height: 2 * size, transform: `rotate(45 ${x} ${y})`,
+          fill: color, stroke: "#0b0c0e", "stroke-width": 0.04, "fill-opacity": dim ? 0.3 : 1,
+        }, this.gRoutes);
+        if (isSel) {
+          const t = el("text", { x, y: y + 0.09, "font-size": 0.24, "font-weight": 800, fill: "#fff", "text-anchor": "middle" }, this.gRoutes);
+          t.textContent = String(index + 1);
+        }
+      });
+    }
+  }
+
+  _drawSelection() {
+    if (!this.gSelection) return;
+    this.gSelection.innerHTML = "";
+    const station = this.selectedStation();
+    if (station) {
+      el("rect", { ...this._cellRect(station.x, station.y, -0.08), rx: 0.2, fill: "none", stroke: "var(--text)", "stroke-width": 0.07 }, this.gSelection);
+    }
+    const robot = this.selectedRobot();
+    if (robot) {
+      const start = docs.resolveRef(this.doc, robot.start);
+      const goal = docs.resolveRef(this.doc, robot.goal);
+      if (start) el("circle", { cx: this._point(start)[0], cy: this._point(start)[1], r: 0.52, fill: "none", stroke: "var(--text)", "stroke-width": 0.07 }, this.gSelection);
+      if (goal) el("circle", { cx: this._point(goal)[0], cy: this._point(goal)[1], r: 0.44, fill: "none", stroke: this.robotColor(robot), "stroke-width": 0.1 }, this.gSelection);
+    }
+  }
+
+  // ================================================================ sidebar
+
+  _renderFleet() {
+    const list = $("#ed-robot-list");
+    const selected = this.selectedRobot();
+    if (!this.doc.robots.length) {
+      list.innerHTML = `<div class="ed-empty">No robots yet. Use <b>+ Add robot</b>, then click a start and a goal on the map.</div>`;
+    } else {
+      list.innerHTML = this.doc.robots.map((r) => {
+        const route = this.routes[r.id];
+        const unreachable = route && route.outbound === null;
+        return `
+          <div class="ed-robot${r === selected ? " selected" : ""}" data-robot="${escapeHtml(r.id)}">
+            <div class="robot-badge" style="background:${this.robotColor(r)}">${escapeHtml(r.id)}</div>
+            <div class="route">${escapeHtml(docs.describeRef(this.doc, r.start))}<span class="arrow">→</span>${escapeHtml(docs.describeRef(this.doc, r.goal))}</div>
+            <div class="tags">
+              ${r.via?.length ? `<span title="via-points">${r.via.length} via</span>` : ""}
+              ${r.loop ? `<svg title="loops"><use href="#i-loop"/></svg>` : ""}
+              ${unreachable ? `<span class="bad" title="no lane route">no route</span>` : ""}
+            </div>
+          </div>`;
+      }).join("");
+    }
+    this._renderInspector();
+  }
+
+  _stationOptions(current) {
+    const opts = this.doc.stations.map((s) =>
+      `<option value="s:${escapeHtml(s.id)}" ${current === s.id ? "selected" : ""}>${escapeHtml(s.label || s.id)} (${escapeHtml(s.id)})</option>`);
+    if (Array.isArray(current)) opts.unshift(`<option value="c:${current[0]},${current[1]}" selected>Cell (${current[0]}, ${current[1]})</option>`);
+    if (typeof current === "string" && !this.doc.stations.some((s) => s.id === current)) {
+      opts.unshift(`<option value="" selected>${escapeHtml(current)} (missing)</option>`);
+    }
+    if (current === null || current === undefined) opts.unshift(`<option value="" selected>— not set —</option>`);
+    return opts.join("");
+  }
+
+  _renderInspector() {
+    const box = $("#ed-inspect");
+    const robot = this.selectedRobot();
+    const station = this.selectedStation();
+
+    if (robot) {
+      const route = this.routes[robot.id];
+      let stats = "";
+      if (route && route.outbound) {
+        const turns = countTurns(route.outbound);
+        stats = `<div class="route-stats">Route: ${route.outbound.length - 1} m · ${turns} turn${turns === 1 ? "" : "s"}${route.back ? ` · return ${route.back.length - 1} m` : ""}</div>`;
+      } else if (route) {
+        stats = `<div class="route-stats bad">No lane route from start to goal${robot.via.length ? " through these via-points" : ""}.</div>`;
+      }
+      const vias = robot.via.length
+        ? robot.via.map((v, i) => `<span class="via-chip"><b>${i + 1}</b>${v[0]},${v[1]}<button data-remove-via="${i}" title="Remove">×</button></span>`).join("")
+        : `<span class="muted">None: A* picks the route</span>`;
+      box.innerHTML = `
+        <h3><span class="robot-badge" style="background:${this.robotColor(robot)}">${escapeHtml(robot.id)}</span>Robot <span class="muted">${escapeHtml(robot.id)}</span></h3>
+        <div class="fields">
+          <label>ID</label><input type="text" data-field="robot-id" value="${escapeHtml(robot.id)}" />
+          <label>Start</label><div class="pair"><select data-field="start">${this._stationOptions(robot.start)}</select><button class="btn small" data-pick="start" title="Pick on map"><svg><use href="#i-target"/></svg></button></div>
+          <label>Goal</label><div class="pair"><select data-field="goal">${this._stationOptions(robot.goal)}</select><button class="btn small" data-pick="goal" title="Pick on map"><svg><use href="#i-target"/></svg></button></div>
+          <label>Max speed</label><div class="pair"><input type="number" data-field="max_speed" min="0.1" max="1" step="0.1" value="${robot.max_speed ?? 1}" /><span class="muted">m/s</span></div>
+          <label>Behaviour</label><label class="check"><input type="checkbox" data-field="loop" ${robot.loop ? "checked" : ""} /> Shuttle back and forth</label>
+          <label>Via</label><div class="via-list">${vias}</div>
+        </div>
+        ${stats}
+        <div class="inspect-actions">
+          <button class="btn small ${this.tool === "route" ? "active" : ""}" data-action="edit-route"><svg><use href="#t-route"/></svg>${this.tool === "route" ? "Editing route…" : "Edit route"}</button>
+          ${robot.via.length ? `<button class="btn small" data-action="clear-via">Clear via-points</button>` : ""}
+          <button class="btn small danger" data-action="delete-robot"><svg><use href="#i-trash"/></svg>Delete</button>
+        </div>`;
+      return;
+    }
+
+    if (station) {
+      const users = this.doc.robots.filter((r) => r.start === station.id || r.goal === station.id).map((r) => r.id);
+      box.innerHTML = `
+        <h3><svg width="18" height="18"><use href="#st-${station.type}"/></svg>Station <span class="muted">${escapeHtml(station.id)} at (${station.x}, ${station.y})</span></h3>
+        <div class="fields">
+          <label>ID</label><input type="text" data-field="station-id" value="${escapeHtml(station.id)}" />
+          <label>Label</label><input type="text" data-field="label" value="${escapeHtml(station.label || "")}" />
+          <label>Type</label><select data-field="type">${docs.STATION_TYPES.map((t) => `<option value="${t}" ${t === station.type ? "selected" : ""}>${t[0].toUpperCase() + t.slice(1)}</option>`).join("")}</select>
+          <label>Used by</label><span class="muted">${users.length ? users.join(", ") : "no robots"}</span>
+        </div>
+        <div class="inspect-actions">
+          <button class="btn small danger" data-action="delete-station"><svg><use href="#i-trash"/></svg>Delete</button>
+        </div>`;
+      return;
+    }
+
+    box.innerHTML = `<div class="ed-empty">
+      Select a robot above, or a station or robot on the map (<b>Select</b> tool, V), to edit it.<br />
+      <b>Station</b> (7) places stations · <b>Route</b> (8) adds via-points for the selected robot.<br />
+      Robots only turn, change lanes or U-turn at <b>junctions</b>.
+    </div>`;
+  }
+
+  _onInspectorChange(event) {
+    const field = event.target.dataset.field;
+    if (!field) return;
+    const value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+    const robot = this.selectedRobot();
+    const station = this.selectedStation();
+
+    if (robot) {
+      if (field === "robot-id") {
+        const before = this.snapshot();
+        if (!docs.renameRobot(this.doc, robot.id, value)) {
+          this.toast("Robot IDs must be unique and not empty");
+          this.render();
+          return;
+        }
+        this.selection = { kind: "robot", id: robot.id };
+        this.commit(before);
+      } else if (field === "start" || field === "goal") {
+        if (!value) return;
+        this.change(() => {
+          robot[field] = value.startsWith("s:") ? value.slice(2) : value.slice(2).split(",").map(Number);
+        });
+      } else if (field === "max_speed") {
+        const speed = Math.min(1, Math.max(0.1, Number(value) || 1));
+        this.change(() => { robot.max_speed = speed; });
+      } else if (field === "loop") {
+        this.change(() => { if (value) robot.loop = true; else delete robot.loop; });
+      }
+      return;
+    }
+
+    if (station) {
+      if (field === "station-id") {
+        const before = this.snapshot();
+        if (!docs.renameStation(this.doc, station.id, value)) {
+          this.toast("Station IDs must be unique and not empty");
+          this.render();
+          return;
+        }
+        this.selection = { kind: "station", id: station.id };
+        this.commit(before);
+      } else if (field === "label") {
+        this.change(() => { station.label = value.trim() || station.id; });
+      } else if (field === "type") {
+        this.change(() => { station.type = value; });
+      }
+    }
+  }
+
+  _onInspectorClick(event) {
+    const robot = this.selectedRobot();
+    const station = this.selectedStation();
+    const pick = event.target.closest("[data-pick]");
+    if (pick && robot) {
+      this.startPick({ kind: "field", robotId: robot.id, field: pick.dataset.pick });
+      return;
+    }
+    const removeVia = event.target.closest("[data-remove-via]");
+    if (removeVia && robot) {
+      this.change(() => robot.via.splice(Number(removeVia.dataset.removeVia), 1));
+      return;
+    }
+    const action = event.target.closest("[data-action]")?.dataset.action;
+    if (action === "edit-route") this.setTool(this.tool === "route" ? "select" : "route");
+    else if (action === "clear-via" && robot) this.change(() => { robot.via = []; });
+    else if (action === "delete-robot" || action === "delete-station") this.deleteSelection();
+  }
+
+  deleteSelection() {
+    const robot = this.selectedRobot();
+    const station = this.selectedStation();
+    if (robot) {
+      this.selection = null;
+      this.change(() => docs.removeRobot(this.doc, robot.id));
+    } else if (station) {
+      const users = this.doc.robots.filter((r) => r.start === station.id || r.goal === station.id).map((r) => r.id);
+      if (users.length && !window.confirm(`Robots ${users.join(", ")} use ${station.id}. Delete it anyway?`)) return;
+      this.selection = null;
+      this.change(() => docs.removeStation(this.doc, station.id));
+    }
+  }
+
+  select(selection) {
+    this.selection = selection;
+    this._drawRoutes();
+    this._drawSelection();
+    this._renderFleet();
+  }
+
   // ================================================================ tools
 
   setTool(tool) {
+    if (tool === "route" && !this.selectedRobot()) {
+      if (this.doc?.robots.length) this.toast("Select a robot first (click it in the Robots list)");
+      else this.toast("Add a robot first");
+      tool = "select";
+    }
+    this.cancelPick();
     this.tool = tool;
     for (const btn of document.querySelectorAll("#ed-tools .tool")) btn.classList.toggle("active", btn.dataset.tool === tool);
-    $("#ed-lanes").classList.toggle("off", tool !== "road");
+    $("#ed-lanes").hidden = tool !== "road";
+    $("#ed-station-type").hidden = tool !== "station";
+    this._setHint(TOOL_HINTS[tool] || DEFAULT_HINT);
     this._updatePanMode();
+    if (this.loaded) this._renderInspector();
   }
 
   setLanes(n) {
@@ -216,38 +531,165 @@ export class Editor {
     if (this.stroke) this._drawPreview();
   }
 
+  _setHint(text, picking = false) {
+    $("#ed-hint").textContent = text;
+    $(".ed-status").classList.toggle("picking", picking);
+    this.map.svg.classList.toggle("picking", picking);
+  }
+
   _updatePanMode() {
     const pan = this.tool === "pan" || this.spaceHeld;
     this.map.panWithLeft = !!pan;
     this.map.svg.classList.toggle("pan", !!pan);
   }
 
-  _strokeCells() {
-    const { start, current, rect } = this.stroke;
-    if (this.tool === "road") return ops.roadCells(start, current, this.lanes, this.lastDir);
-    const cells = rect ? ops.rectCells(start, current) : ops.lineCells(start, current).cells;
-    return cells.map(([x, y]) => ({ x, y }));
+  // ---------------------------------------------------------------- pick mode
+
+  startPick(pick) {
+    if (!this.loaded) return;
+    this.pick = { stage: pick.kind === "add" ? "start" : pick.field, ...pick };
+    const what = this.pick.stage === "start" ? "START" : "GOAL";
+    const who = pick.kind === "add" ? "the new robot" : pick.robotId;
+    this._setHint(`Click the ${what} for ${who}: a station or any lane cell · Esc to cancel`, true);
   }
 
-  // MapView edit handler ---------------------------------------------
+  cancelPick() {
+    if (!this.pick) return;
+    this.pick = null;
+    this._setHint(TOOL_HINTS[this.tool] || DEFAULT_HINT);
+  }
+
+  _handlePick(cell) {
+    const ref = docs.refAt(this.doc, cell[0], cell[1]);
+    if (this.pick.kind === "add") {
+      if (this.pick.stage === "start") {
+        this.pick.start = ref;
+        this.pick.stage = "goal";
+        this._setHint("Now click the GOAL for the new robot: a station or any lane cell · Esc to cancel", true);
+        return;
+      }
+      const start = this.pick.start;
+      this.pick = null;
+      const robot = this.change(() => docs.addRobot(this.doc, start, ref));
+      this.setTool("select");
+      this.select({ kind: "robot", id: robot.id });
+      return;
+    }
+    const robot = this.doc.robots.find((r) => r.id === this.pick.robotId);
+    const field = this.pick.field;
+    this.cancelPick();
+    if (robot) this.change(() => { robot[field] = ref; });
+  }
+
+  // ---------------------------------------------------------------- hit testing
+
+  _hit(cell) {
+    const robot = this.selectedRobot();
+    if (robot) {
+      const via = robot.via.findIndex((v) => same(v, cell));
+      if (via >= 0) return { what: "via", id: robot.id, index: via };
+      if (same(docs.resolveRef(this.doc, robot.goal), cell)) return { what: "goal", id: robot.id };
+    }
+    const starter = [...this.doc.robots].reverse().find((r) => same(docs.resolveRef(this.doc, r.start), cell));
+    if (starter) return { what: "start", id: starter.id };
+    const station = docs.stationAt(this.doc, cell[0], cell[1]);
+    if (station) return { what: "station", id: station.id };
+    const goaler = [...this.doc.robots].reverse().find((r) => same(docs.resolveRef(this.doc, r.goal), cell));
+    if (goaler) return { what: "goal", id: goaler.id };
+    return null;
+  }
+
+  // ---------------------------------------------------------------- MapView edit handler
 
   down(cell, event) {
     if (!cell || !this.loaded) return;
-    this.stroke = { start: cell, current: cell, rect: event.shiftKey && this.tool !== "road" };
-    this._drawPreview();
+    if (this.pick) { this._handlePick(cell); return; }
+
+    if (PAINT_TOOLS.has(this.tool)) {
+      this.stroke = { start: cell, current: cell, rect: event.shiftKey && this.tool !== "road" };
+      this._drawPreview();
+      return;
+    }
+
+    if (this.tool === "route") {
+      const robot = this.selectedRobot();
+      if (!robot) { this.setTool("select"); return; }
+      const ch = this.doc.grid[cell[1]][cell[0]];
+      const isVia = robot.via.some((v) => same(v, cell));
+      if (!isVia && !ops.isLane(ch)) { this.toast("Via-points must be on lane cells"); return; }
+      this.change(() => docs.toggleVia(robot, cell[0], cell[1]));
+      return;
+    }
+
+    if (this.tool === "station") {
+      const existing = docs.stationAt(this.doc, cell[0], cell[1]);
+      if (existing) {
+        this.select({ kind: "station", id: existing.id });
+        this.drag = { what: "station", id: existing.id, before: this.snapshot(), last: cell, moved: false };
+        return;
+      }
+      const ch = this.doc.grid[cell[1]][cell[0]];
+      if (ch === ops.WALL || ch === ops.SHELF) { this.toast("Stations can't be placed on walls or shelves"); return; }
+      const station = this.change(() => docs.addStation(this.doc, cell[0], cell[1], this.stationType));
+      this.select({ kind: "station", id: station.id });
+      return;
+    }
+
+    if (this.tool === "select") {
+      const hit = this._hit(cell);
+      if (!hit) { this.select(null); return; }
+      this.select({ kind: hit.what === "station" ? "station" : "robot", id: hit.id });
+      this.drag = { ...hit, before: this.snapshot(), last: cell, moved: false };
+    }
   }
 
   move(cell) {
     this.hover = cell;
     this._drawHover();
     this._updateCursor(cell);
-    if (this.stroke && cell && (cell[0] !== this.stroke.current[0] || cell[1] !== this.stroke.current[1])) {
+    if (this.tool === "select" && !this.drag) this.map.svg.classList.toggle("hit", !!(cell && this._hit(cell)));
+    if (this.stroke && cell && !same(cell, this.stroke.current)) {
       this.stroke.current = cell;
       this._drawPreview();
     }
+    if (this.drag && cell && !same(cell, this.drag.last)) {
+      this._dragTo(cell);
+    }
+  }
+
+  _dragTo(cell) {
+    const d = this.drag;
+    let ok = true;
+    if (d.what === "station") {
+      const ch = this.doc.grid[cell[1]][cell[0]];
+      ok = ch !== ops.WALL && ch !== ops.SHELF && docs.moveStation(this.doc, d.id, cell[0], cell[1]);
+    } else {
+      const robot = this.doc.robots.find((r) => r.id === d.id);
+      if (!robot) return;
+      const ch = this.doc.grid[cell[1]][cell[0]];
+      const isStation = !!docs.stationAt(this.doc, cell[0], cell[1]);
+      // Only drop where the robot can actually be: lanes (and stations for start/goal).
+      if (d.what === "via") {
+        if (!ops.isLane(ch) || isStation) return;
+        robot.via[d.index] = [cell[0], cell[1]];
+      } else {
+        if (!ops.isLane(ch) && !isStation) return;
+        robot[d.what] = docs.refAt(this.doc, cell[0], cell[1]);
+      }
+    }
+    if (!ok) return;
+    d.last = cell;
+    d.moved = true;
+    this.render();
   }
 
   up() {
+    if (this.drag) {
+      const drag = this.drag;
+      this.drag = null;
+      if (drag.moved) this.commit(drag.before);
+      return;
+    }
     if (!this.stroke) return;
     const cells = this._strokeCells();
     const before = this.snapshot();
@@ -269,6 +711,13 @@ export class Editor {
     this.hover = null;
     if (this.gHover) this.gHover.innerHTML = "";
     this._updateCursor(null);
+  }
+
+  _strokeCells() {
+    const { start, current, rect } = this.stroke;
+    if (this.tool === "road") return ops.roadCells(start, current, this.lanes, this.lastDir);
+    const cells = rect ? ops.rectCells(start, current) : ops.lineCells(start, current).cells;
+    return cells.map(([x, y]) => ({ x, y }));
   }
 
   _drawPreview() {
@@ -293,16 +742,17 @@ export class Editor {
   _drawHover() {
     if (!this.gHover) return;
     this.gHover.innerHTML = "";
-    if (!this.hover || this.stroke || this.tool === "pan") return;
+    if (!this.hover || this.stroke || this.drag || this.tool === "pan") return;
     const [x, y] = this.hover;
-    el("rect", { ...this._cellRect(x, y, 0.03), rx: 0.08, fill: "none", stroke: "var(--text)", "stroke-width": 0.05, "stroke-opacity": 0.7 }, this.gHover);
+    const color = this.pick ? "var(--warning)" : "var(--text)";
+    el("rect", { ...this._cellRect(x, y, 0.03), rx: 0.08, fill: "none", stroke: color, "stroke-width": 0.05, "stroke-opacity": 0.8 }, this.gHover);
   }
 
   _updateCursor(cell) {
     const node = $("#ed-cursor");
     if (!cell) { node.textContent = "—"; return; }
     const [x, y] = cell;
-    const station = this.doc.stations.find((s) => s.x === x && s.y === y);
+    const station = docs.stationAt(this.doc, x, y);
     const what = station ? `Station ${station.label || station.id} (${station.type})` : CELL_NAMES[this.doc.grid[y][x]] || "";
     let extra = "";
     if (this.stroke) {
@@ -335,9 +785,7 @@ export class Editor {
   rename(name) {
     const clean = name.trim() || "Untitled warehouse";
     if (clean === this.doc.name) return;
-    const before = this.snapshot();
-    this.doc.name = clean;
-    this.commit(before);
+    this.change(() => { this.doc.name = clean; });
   }
 
   async newLayout() {
@@ -416,7 +864,7 @@ export class Editor {
     this.onRun(this.file);
   }
 
-  // ================================================================ validation
+  // ================================================================ validation + routes
 
   validateSoon(delay = 250) {
     clearTimeout(this._validateTimer);
@@ -426,23 +874,26 @@ export class Editor {
   async validate() {
     if (!this.loaded) return;
     const seq = ++this._validateSeq;
-    let issues;
+    let body;
     try {
       const res = await fetch("/api/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(this.toLayout()),
       });
-      issues = (await res.json()).issues;
+      body = await res.json();
     } catch {
       return;
     }
     if (seq !== this._validateSeq) return; // a newer validation is in flight
-    this.issues = issues.map((issue) => ({ ...issue, cells: issue.cells || [] }));
-    issues = this.issues;
+    this.issues = (body.issues || []).map((issue) => ({ ...issue, cells: issue.cells || [] }));
+    this.routes = body.routes || {};
     this.highlight = [];
     this._drawHighlight();
+    this._drawRoutes();
+    this._renderFleet();
 
+    const issues = this.issues;
     const errors = issues.filter((i) => i.severity === "error").length;
     const warnings = issues.length - errors;
     $("#ed-issues-summary").textContent = issues.length ? `${errors} error${errors === 1 ? "" : "s"} · ${warnings} warning${warnings === 1 ? "" : "s"}` : "";
@@ -460,7 +911,10 @@ export class Editor {
 
   showIssue(index) {
     const issue = this.issues[index];
-    if (!issue || !issue.cells.length) return;
+    if (!issue) return;
+    if (this.doc.robots.some((r) => r.id === issue.target)) this.select({ kind: "robot", id: issue.target });
+    else if (this.doc.stations.some((s) => s.id === issue.target)) this.select({ kind: "station", id: issue.target });
+    if (!issue.cells.length) return;
     this.highlight = issue.cells;
     this._drawHighlight();
   }
@@ -480,12 +934,22 @@ export class Editor {
       if (!this.spaceHeld) { this.spaceHeld = true; this._updatePanMode(); }
       return true;
     }
+    if (event.key === "Escape") {
+      if (this.pick) { this.cancelPick(); return true; }
+      if (this.stroke) { this.stroke = null; this.gPreview.innerHTML = ""; return true; }
+      if (this.tool === "route") { this.setTool("select"); return true; }
+      if (this.selection) { this.select(null); return true; }
+      return false;
+    }
+    if ((event.key === "Delete" || event.key === "Backspace") && this.selection) {
+      this.deleteSelection();
+      return true;
+    }
     const tool = TOOL_KEYS[event.key.toLowerCase()];
     if (tool) { this.setTool(tool); return true; }
     if (event.key === "[") { this.setLanes(this.lanes - 1); return true; }
     if (event.key === "]") { this.setLanes(this.lanes + 1); return true; }
     if (event.key === "f" || event.key === "F") { this.map.fit(); return true; }
-    if (event.key === "Escape" && this.stroke) { this.stroke = null; this.gPreview.innerHTML = ""; return true; }
     return false;
   }
 
@@ -500,6 +964,7 @@ export class Editor {
       const step = event.target.closest("[data-step]");
       if (step) { this.setLanes(this.lanes + Number(step.dataset.step)); this.setTool("road"); }
     });
+    $("#ed-station-type-select").addEventListener("change", (event) => { this.stationType = event.target.value; });
     $("#ed-undo").addEventListener("click", () => this.undo());
     $("#ed-redo").addEventListener("click", () => this.redo());
     $("#ed-fit").addEventListener("click", () => this.map.fit());
@@ -514,11 +979,36 @@ export class Editor {
       const item = event.target.closest(".ed-issue[data-index]");
       if (item) this.showIssue(Number(item.dataset.index));
     });
+    $("#ed-add-robot").addEventListener("click", () => {
+      if (!this.loaded) return;
+      this.setTool("select");
+      this.startPick({ kind: "add" });
+    });
+    $("#ed-robot-list").addEventListener("click", (event) => {
+      const row = event.target.closest("[data-robot]");
+      if (!row) return;
+      this.select({ kind: "robot", id: row.dataset.robot });
+    });
+    $("#ed-inspect").addEventListener("change", (event) => this._onInspectorChange(event));
+    $("#ed-inspect").addEventListener("click", (event) => this._onInspectorClick(event));
+    $("#ed-inspect").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && event.target.matches("input[type=text], input[type=number]")) event.target.blur();
+    });
     window.addEventListener("blur", () => { this.spaceHeld = false; this._updatePanMode(); });
   }
 }
 
-// ------------------------------------------------------------------ dialog
+// ------------------------------------------------------------------ helpers
+
+function countTurns(cells) {
+  let turns = 0;
+  for (let i = 1; i < cells.length - 1; i++) {
+    const a = [cells[i][0] - cells[i - 1][0], cells[i][1] - cells[i - 1][1]];
+    const b = [cells[i + 1][0] - cells[i][0], cells[i + 1][1] - cells[i][1]];
+    if (a[0] !== b[0] || a[1] !== b[1]) turns++;
+  }
+  return turns;
+}
 
 export function dialog({ title, body, ok = "OK" }) {
   const dlg = $("#dlg");

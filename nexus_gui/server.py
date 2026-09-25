@@ -238,8 +238,9 @@ def api_validate(payload: Dict[str, Any]):
     try:
         layout = Layout(payload)
     except (LayoutError, KeyError, TypeError, ValueError) as error:
-        return {"issues": [{"severity": "error", "message": str(error), "target": ""}]}
-    return {"issues": layout.validate(), "layout": layout.to_dict()}
+        return {"issues": [{"severity": "error", "message": str(error), "target": "", "cells": []}], "routes": {}}
+    issues, routes = layout.analyse()
+    return {"issues": issues, "routes": routes, "layout": layout.to_dict()}
 
 
 # ----------------------------------------------------------------------

@@ -180,7 +180,16 @@ class Layout:
         Severity 'error' blocks simulation; 'warning' does not. `cells`
         lists the [x, y] cells the editor should highlight.
         """
+        return self.analyse()[0]
+
+    def analyse(self) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+        """
+        (issues, routes). routes maps robot id -> {"outbound": [[x, y], ...]
+        or None, "back": [...] or None (loop robots only)}: the lane route
+        the planner would drive from start through the via-points to goal.
+        """
         issues: List[Dict[str, Any]] = []
+        routes: Dict[str, Dict[str, Any]] = {}
 
         def add(severity: str, message: str, target: str = "", cells=()):
             issues.append({
@@ -256,21 +265,28 @@ class Layout:
 
             grid = LaneGrid(self, turn_penalty=float(self.simulation.get("turn_penalty", 1.0)))
 
-            def reachable(stops: List[Cell]) -> bool:
+            def route(stops: List[Cell]) -> Optional[List[List[int]]]:
+                cells: List[List[int]] = []
                 for a, b in zip(stops, stops[1:]):
-                    if not grid.plan(self.cell_center(a), self.cell_center(b)):
-                        return False
-                return True
+                    leg = grid.plan(self.cell_center(a), self.cell_center(b))
+                    if not leg:
+                        return None
+                    leg_cells = [list(self.world_to_cell(p)) for p in leg]
+                    cells.extend(leg_cells if not cells else leg_cells[1:])
+                return cells
 
             for robot, start, goal in routable:
                 via = [(int(v[0]), int(v[1])) for v in robot.get("via", [])]
-                if not reachable([start] + via + [goal]):
+                outbound = route([start] + via + [goal])
+                back = route([goal, start]) if robot.get("loop") and outbound else None
+                routes[robot["id"]] = {"outbound": outbound, "back": back}
+                if outbound is None:
                     add("warning", f"{robot['id']}: no lane route from start to goal"
                         + (" through its via-points" if via else ""), robot["id"], [start, goal])
-                elif robot.get("loop") and not reachable([goal, start]):
+                elif robot.get("loop") and back is None:
                     add("warning", f"{robot['id']}: can reach its goal but has no lane route back", robot["id"], [goal, start])
 
-        return issues
+        return issues, routes
 
     def to_dict(self) -> Dict[str, Any]:
         return deepcopy(self.data)

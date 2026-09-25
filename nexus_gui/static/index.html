@@ -39,6 +39,12 @@
       <symbol id="t-wall" viewBox="0 0 24 24"><path d="M3 5h18v14H3zM3 12h18M9 5v7M15 12v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
       <symbol id="t-human" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 21 21 7M3 13 13 3M13 21l8-8" stroke="currentColor" stroke-width="1.6"/></symbol>
       <symbol id="t-erase" viewBox="0 0 24 24"><path d="M8.5 20H20M4.5 15.5l9-9a2 2 0 0 1 2.8 0l3.2 3.2a2 2 0 0 1 0 2.8L12 20H8.5l-4-4a2 2 0 0 1 0-2.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="t-select" viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L9.5 19z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="t-station" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="t-route" viewBox="0 0 24 24"><circle cx="5" cy="19" r="2.2" fill="currentColor"/><path d="M5 16.5V11a3 3 0 0 1 3-3h8a3 3 0 0 0 3-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 2.5"/><path d="M19 1.5 21.5 4 19 6.5 16.5 4z" fill="currentColor"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M12 1.5V5M12 19v3.5M1.5 12H5M19 12h3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="i-loop" viewBox="0 0 24 24"><path d="M17 3l3 3-3 3M20 6H9a5 5 0 0 0-5 5M7 21l-3-3 3-3M4 18h11a5 5 0 0 0 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM7 3v6h8V3M7 21v-7h10v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
@@ -157,6 +163,7 @@
           <div class="map-bar">
             <div class="tools" id="ed-tools" role="toolbar" aria-label="Editor tools">
               <button class="tool" data-tool="pan" title="Pan (H) — or middle-drag / hold Space"><svg><use href="#t-pan"/></svg><span>Pan</span></button>
+              <button class="tool" data-tool="select" title="Select & move stations, robots, via-points (V)"><svg><use href="#t-select"/></svg><span>Select</span></button>
               <span class="tool-sep"></span>
               <button class="tool" data-tool="road" title="One-way road (1) — drag in the direction of travel"><svg><use href="#t-road"/></svg><span>Road</span></button>
               <button class="tool" data-tool="lane" title="Two-way lane / junction (2)"><svg><use href="#t-lane"/></svg><span>Junction</span></button>
@@ -164,6 +171,18 @@
               <button class="tool" data-tool="wall" title="Wall (4)"><svg><use href="#t-wall"/></svg><span>Wall</span></button>
               <button class="tool" data-tool="human" title="Human-only area (5)"><svg><use href="#t-human"/></svg><span>Human</span></button>
               <button class="tool" data-tool="erase" title="Eraser (6)"><svg><use href="#t-erase"/></svg><span>Erase</span></button>
+              <span class="tool-sep"></span>
+              <button class="tool" data-tool="station" title="Place a station (7)"><svg><use href="#t-station"/></svg><span>Station</span></button>
+              <button class="tool" data-tool="route" title="Via-points for the selected robot (8)"><svg><use href="#t-route"/></svg><span>Route</span></button>
+              <label class="ctx-ctl" id="ed-station-type" title="Station type">
+                <span>Type</span>
+                <select id="ed-station-type-select">
+                  <option value="loading">Loading</option>
+                  <option value="unloading">Unloading</option>
+                  <option value="workstation">Workstation</option>
+                  <option value="charging">Charging</option>
+                </select>
+              </label>
               <div class="lanes-ctl" id="ed-lanes" title="Lanes per road ([ and ])">
                 <span>Lanes</span>
                 <button data-step="-1" aria-label="Fewer lanes">−</button>
@@ -200,19 +219,18 @@
           <div class="ed-stats" id="ed-stats"></div>
         </section>
 
+        <section class="card ed-fleet-card">
+          <div class="card-head">
+            <h2>Robots</h2>
+            <button class="btn small" id="ed-add-robot" title="Add a robot, then click its start and goal on the map">+ Add robot</button>
+          </div>
+          <div class="ed-robot-list" id="ed-robot-list"></div>
+          <div class="ed-inspect" id="ed-inspect"></div>
+        </section>
+
         <section class="card ed-issues-card">
           <div class="card-head"><h2>Issues</h2><span class="card-hint" id="ed-issues-summary"></span></div>
           <ul class="ed-issues" id="ed-issues"></ul>
-        </section>
-
-        <section class="card ed-help">
-          <div class="card-head"><h2>How roads work</h2></div>
-          <ul class="help">
-            <li><b>Road</b> paints one-way lanes in the direction you drag. With 2+ lanes, traffic keeps right: half the lanes go each way.</li>
-            <li>Where roads cross, or a road passes a station, cells become <b>junctions</b> (two-way). Robots only turn, change lanes or U-turn at junctions.</li>
-            <li>Use <b>Junction</b> to add turning points by hand, e.g. at the end of an aisle.</li>
-            <li>Stations and robots: next step. Existing ones are kept and shown.</li>
-          </ul>
         </section>
       </aside>
     </main>
