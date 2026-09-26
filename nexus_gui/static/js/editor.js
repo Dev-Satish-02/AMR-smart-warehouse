@@ -6,6 +6,7 @@ import { MapView, el } from "./map.js";
 import * as ops from "./grid-ops.js";
 import * as docs from "./doc-ops.js";
 import { CATALOG, objectType, speedLimit } from "./catalog.js";
+import { displayColor } from "./format.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -152,7 +153,7 @@ export class Editor {
 
   robotColor(robot) {
     const index = this.doc.robots.indexOf(robot);
-    return robot.color || ROBOT_COLORS[Math.max(index, 0) % ROBOT_COLORS.length];
+    return displayColor(robot.color || ROBOT_COLORS[Math.max(index, 0) % ROBOT_COLORS.length]);
   }
 
   selectedRobot() {

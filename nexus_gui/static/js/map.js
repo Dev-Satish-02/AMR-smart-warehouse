@@ -4,6 +4,7 @@
 
 import { labelPlacement } from "./grid-ops.js";
 import { objectType, objectCells, speedLimit } from "./catalog.js";
+import { displayColor } from "./format.js";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -109,8 +110,8 @@ export class MapView {
   _defs() {
     const defs = el("defs", {}, this.svg);
     const hatch = el("pattern", { id: `${this.uid}-hatch`, width: 0.28, height: 0.28, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
-    el("rect", { width: 0.28, height: 0.28, fill: "rgba(201,162,39,0.07)" }, hatch);
-    el("line", { x1: 0, y1: 0, x2: 0, y2: 0.28, stroke: "rgba(201,162,39,0.55)", "stroke-width": 0.06 }, hatch);
+    el("rect", { width: 0.28, height: 0.28, fill: "var(--human-hatch-bg)" }, hatch);
+    el("line", { x1: 0, y1: 0, x2: 0, y2: 0.28, stroke: "var(--human-hatch-line)", "stroke-width": 0.06 }, hatch);
     const shelf = el("pattern", { id: `${this.uid}-shelf`, width: 0.25, height: 0.25, patternUnits: "userSpaceOnUse" }, defs);
     el("rect", { width: 0.25, height: 0.25, fill: "var(--shelf)" }, shelf);
     el("line", { x1: 0, y1: 0.125, x2: 0.25, y2: 0.125, stroke: "var(--shelf-line)", "stroke-width": 0.03 }, shelf);
@@ -285,7 +286,7 @@ export class MapView {
       }
       return;
     }
-    el("rect", { ...rect, fill: "rgba(201,162,39,0.06)", stroke: "var(--zone-slow)", "stroke-width": 0.06, "stroke-dasharray": "0.24 0.14" }, this.gSafety);
+    el("rect", { ...rect, fill: "var(--zone-slow-fill)", stroke: "var(--zone-slow)", "stroke-width": 0.06, "stroke-dasharray": "0.24 0.14" }, this.gSafety);
     const limit = speedLimit(obj);
     const text = `${obj.name || "Slow zone"}${limit ? ` · ≤ ${limit} m/s` : ""}`;
     const size = Math.min(0.3, rect.height * 0.35);
@@ -360,8 +361,8 @@ export class MapView {
         const g = el("g", { transform: `translate(${mx} ${this.sy(my)})${spot.horizontal ? "" : " rotate(-90)"}` }, this.gZones);
         const textWidth = label.length * size * 0.68;
         const left = -(icon + gap + textWidth) / 2;
-        el("use", { href: "#i-person", x: left, y: -icon / 2, width: icon, height: icon, color: "rgba(201,162,39,0.9)" }, g);
-        const text = el("text", { x: left + icon + gap, y: size * 0.36, "font-size": size, "font-weight": 800, "letter-spacing": 0.04, fill: "rgba(201,162,39,0.9)" }, g);
+        el("use", { href: "#i-person", x: left, y: -icon / 2, width: icon, height: icon, color: "var(--human-label)" }, g);
+        const text = el("text", { x: left + icon + gap, y: size * 0.36, "font-size": size, "font-weight": 800, "letter-spacing": 0.04, fill: "var(--human-label)" }, g);
         text.textContent = label;
       }
     }
@@ -375,7 +376,7 @@ export class MapView {
     for (const s of this.layout.stations) {
       const r = this.cellRect(s.x, s.y, 0.08);
       const g = el("g", { class: `station station-${s.type}` }, this.gStations);
-      el("rect", { ...r, rx: 0.14, fill: "#262a30", stroke: "var(--station)", "stroke-width": 0.05 }, g);
+      el("rect", { ...r, rx: 0.14, fill: "var(--station-fill)", stroke: "var(--station)", "stroke-width": 0.05 }, g);
       el("use", { href: `#st-${s.type}`, x: r.x + 0.2 * this.cs, y: r.y + 0.2 * this.cs, width: 0.44 * this.cs, height: 0.44 * this.cs, color: "var(--text)" }, g);
       const [cx] = this.cellCenter(s.x, s.y);
       const above = s.y < this.layout.height - 1 && !this.isDrivable(s.x, s.y + 1);
@@ -401,7 +402,7 @@ export class MapView {
     for (const r of state.robots) {
       if (this.selected && this.selected !== r.id) continue;
       for (const [x, y] of r.reserved) {
-        el("rect", { ...this.cellRect(x, y, 0.06), rx: 0.1, fill: r.color, "fill-opacity": 0.16, stroke: r.color, "stroke-opacity": 0.55, "stroke-width": 0.035 }, this.gReserved);
+        el("rect", { ...this.cellRect(x, y, 0.06), rx: 0.1, fill: displayColor(r.color), "fill-opacity": 0.16, stroke: displayColor(r.color), "stroke-opacity": 0.55, "stroke-width": 0.035 }, this.gReserved);
       }
     }
 
@@ -414,17 +415,17 @@ export class MapView {
       if (r.path.length > 1 && !["ARRIVED", "DOCKED"].includes(r.status)) {
         const line = el("polyline", {
           points: r.path.map(([x, y]) => `${x},${this.sy(y)}`).join(" "),
-          fill: "none", stroke: r.color, "stroke-width": this.selected === r.id ? 0.12 : 0.08,
+          fill: "none", stroke: displayColor(r.color), "stroke-width": this.selected === r.id ? 0.12 : 0.08,
           "stroke-opacity": this.selected === r.id ? 0.95 : 0.6, "stroke-linejoin": "round", "stroke-linecap": "round",
         }, g);
         this.pathNodes.set(r.id, { line, rest: r.path.slice(1) });
       }
       const [gx, gy] = this.cellCenter(r.goal[0], r.goal[1]);
       if (!["ARRIVED", "DOCKED"].includes(r.status)) {
-        el("circle", { cx: gx, cy: this.sy(gy), r: 0.3, fill: "none", stroke: r.color, "stroke-width": 0.07, "stroke-dasharray": "0.14 0.1" }, g);
+        el("circle", { cx: gx, cy: this.sy(gy), r: 0.3, fill: "none", stroke: displayColor(r.color), "stroke-width": 0.07, "stroke-dasharray": "0.14 0.1" }, g);
       }
       for (const [vx, vy] of r.via) {
-        el("rect", { x: vx - 0.13, y: this.sy(vy) - 0.13, width: 0.26, height: 0.26, transform: `rotate(45 ${vx} ${this.sy(vy)})`, fill: r.color, stroke: "var(--floor)", "stroke-width": 0.04 }, g);
+        el("rect", { x: vx - 0.13, y: this.sy(vy) - 0.13, width: 0.26, height: 0.26, transform: `rotate(45 ${vx} ${this.sy(vy)})`, fill: displayColor(r.color), stroke: "var(--floor)", "stroke-width": 0.04 }, g);
       }
     }
 
@@ -490,13 +491,14 @@ export class MapView {
     const select = el("circle", { r: 0.62, fill: "none", stroke: "var(--text)", "stroke-width": 0.05, "stroke-opacity": 0.8 }, group);
     const ring = el("circle", { r: 0.5, class: "status-ring" }, group);
     const body = el("g", { class: "robot-body" }, group);
-    el("circle", { r: 0.37, fill: r.color, stroke: "#0b0c0e", "stroke-width": 0.06 }, body);
-    el("path", { d: "M0.4 -0.13 L0.56 0 L0.4 0.13 Z", fill: r.color, stroke: "#0b0c0e", "stroke-width": 0.03 }, body);
+    const color = displayColor(r.color);
+    el("circle", { r: 0.37, fill: color, stroke: "var(--robot-outline)", "stroke-width": 0.06 }, body);
+    el("path", { d: "M0.4 -0.13 L0.56 0 L0.4 0.13 Z", fill: color, stroke: "var(--robot-outline)", "stroke-width": 0.03 }, body);
     const label = el("text", { y: 0.1, "font-size": 0.27, "font-weight": 800, fill: "#fff", "text-anchor": "middle" }, group);
     label.textContent = r.id;
     // Battery gauge under dispatched robots.
     const battery = el("g", { transform: "translate(-0.3 0.46)" }, group);
-    el("rect", { x: -0.02, y: -0.02, width: 0.64, height: 0.14, rx: 0.05, fill: "#0b0c0e", "fill-opacity": 0.85 }, battery);
+    el("rect", { x: -0.02, y: -0.02, width: 0.64, height: 0.14, rx: 0.05, fill: "var(--robot-outline)", "fill-opacity": 0.85 }, battery);
     const batteryFill = el("rect", { x: 0.02, y: 0.02, width: 0.56, height: 0.06, rx: 0.03 }, battery);
     group.addEventListener("click", (event) => { event.stopPropagation(); this.onSelect(r.id); });
     const node = { group, body, ring, select, battery, batteryFill, ringKind: null };
@@ -606,7 +608,7 @@ export class MapView {
       if (m.start) {
         const [x, y] = this.cellCenter(m.start[0], m.start[1]);
         const g = el("g", { transform: `translate(${x} ${this.sy(y)})` }, this.gMarkers);
-        el("circle", { r: 0.34, fill: m.color, stroke: "#0b0c0e", "stroke-width": 0.05, "fill-opacity": 0.9 }, g);
+        el("circle", { r: 0.34, fill: displayColor(m.color), stroke: "var(--robot-outline)", "stroke-width": 0.05, "fill-opacity": 0.9 }, g);
         const t = el("text", { y: 0.1, "font-size": 0.26, "font-weight": 800, fill: "#fff", "text-anchor": "middle" }, g);
         t.textContent = m.id;
       }

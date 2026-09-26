@@ -27,7 +27,8 @@ def main():
     with TestClient(app) as client:
         failures += check(client.get("/").status_code == 200, "GET / serves the page")
         for asset in ("/static/app.css", "/static/js/main.js", "/static/js/map.js",
-                      "/static/js/editor.js", "/static/js/grid-ops.js"):
+                      "/static/js/editor.js", "/static/js/grid-ops.js", "/static/js/pages.js",
+                      "/static/js/format.js", "/static/js/doc-ops.js", "/static/js/catalog.js"):
             failures += check(client.get(asset).status_code == 200, f"GET {asset}")
         failures += check(client.get("/").headers.get("cache-control") == "no-cache"
                           and client.get("/static/js/main.js").headers.get("cache-control") == "no-cache",

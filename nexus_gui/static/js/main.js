@@ -1,6 +1,8 @@
 import { MapView } from "./map.js";
 import { Editor, dialog } from "./editor.js";
 import { loadCatalog, objectType } from "./catalog.js";
+import { displayColor, STATUS, ACTIVITY, fmtDuration } from "./format.js";
+import { MissionsPage, FleetPage, AlertsPage, ReportsPage, initTooltips, hideTooltip, renderAlertBadge } from "./pages.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -8,32 +10,6 @@ const SPEEDS = [0.5, 1, 2, 4, 8];
 const RENDER_DELAY_MS = 140; // render slightly in the past so we can interpolate
 
 // status -> [palette class, icon, label]
-const STATUS = {
-  MOVING: ["st-good", "s-moving", "Moving"],
-  TURNING: ["st-good", "s-turning", "Turning"],
-  REROUTING: ["st-serious", "s-reroute", "Rerouting"],
-  WAITING: ["st-warning", "s-waiting", "Waiting"],
-  YIELDING: ["st-warning", "s-yield", "Yielding"],
-  BACKING_OFF: ["st-serious", "s-backoff", "Backing off"],
-  DOCKED: ["st-neutral", "s-docked", "Docked"],
-  ARRIVED: ["st-neutral", "s-arrived", "Arrived"],
-  IDLE: ["st-neutral", "s-idle", "Idle"],
-  PARKED: ["st-neutral", "s-parked", "Parked"],
-  CHARGING: ["st-good", "s-charging", "Charging"],
-  ERROR: ["st-critical", "s-error", "Error"],
-};
-
-// What a dispatched robot is doing (shown with its motion status).
-const ACTIVITY = {
-  IDLE: "Parked at home",
-  RETURNING: "Returning home",
-  TO_PICKUP: "To pickup",
-  LOADING: "Loading",
-  TO_DROPOFF: "Delivering",
-  UNLOADING: "Unloading",
-  TO_CHARGER: "To charger",
-  CHARGING: "Charging",
-};
 const MISSION_PHASE = { assigned: "To pickup", loading: "Loading", to_dropoff: "Delivering", unloading: "Unloading" };
 
 const EVENT_ICON = {
@@ -142,10 +118,22 @@ function syncSelect() {
 
 // ------------------------------------------------------------------ modes
 
+const MODES = ["live", "missions", "fleet", "alerts", "reports", "editor"];
+
+function modeFromHash() {
+  const hash = location.hash.replace("#", "");
+  if (hash === "overview") return "live";
+  return MODES.includes(hash) ? hash : "live";
+}
+
 async function setMode(next) {
+  if (!MODES.includes(next)) next = "live";
   if (next === mode) return;
+  pages[mode]?.hide();
+  hideTooltip();
   mode = next;
-  history.replaceState(null, "", mode === "editor" ? "#editor" : "#live");
+  document.body.dataset.mode = mode;
+  history.replaceState(null, "", `#${mode === "live" ? "overview" : mode}`);
   for (const node of document.querySelectorAll("[data-view]")) node.hidden = node.dataset.view !== mode;
   for (const tab of document.querySelectorAll(".tab")) {
     const active = tab.dataset.mode === mode;
@@ -155,9 +143,10 @@ async function setMode(next) {
   if (mode === "editor") {
     if (!editor.loaded && app.layoutName) await editor.open(app.layoutName);
     else editor.map.fit();
-  } else {
+  } else if (mode === "live") {
     map.fit();
   }
+  pages[mode]?.show();
   syncSelect();
 }
 
@@ -179,6 +168,62 @@ function onState(msg) {
   renderKpis(msg.state.metrics, msg.state.fleet);
   renderFleet(msg.state);
   renderMissions(msg.state.fleet);
+  renderEstop(msg.state);
+  renderAlertBadge(msg.state.alerts);
+  if (mode === "fleet") pages.fleet.render(msg.state);
+  if (mode === "alerts") pages.alerts.render(msg.state);
+}
+
+// ------------------------------------------------------------------ E-stop
+
+function renderEstop(state) {
+  const engaged = !!state.estop;
+  const button = $("#btn-estop");
+  button.classList.toggle("engaged", engaged);
+  button.querySelector("span").textContent = engaged ? "E-STOP ON" : "E-STOP";
+  button.title = engaged ? "E-stop engaged: release it from the red banner" : "Fleet-wide emergency stop (all robots halt immediately)";
+  $("#estop-banner").hidden = !engaged;
+  if (engaged) {
+    $("#estop-text").textContent = `All robots stopped for ${fmtDuration(state.time - state.estop_since)}. Orders keep queueing; nothing is dispatched until release.`;
+  }
+}
+
+function releaseEstop() {
+  if (window.confirm("Release the E-stop? Robots will resume their tasks.")) send("estop", { value: false });
+}
+
+// ------------------------------------------------------------------ theme
+
+const THEME_KEY = "nexus.theme";
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem(THEME_KEY, theme); } catch { /* storage unavailable */ }
+  // Robot colours and SVG content are theme-dependent: redraw.
+  if (app.layout) {
+    map.setLayout(app.layout, { fit: false });
+    map.robotNodes.forEach((node) => node.group.remove());
+    map.robotNodes.clear();
+    if (app.latest) map.setState(app.latest);
+    renderLegend();
+  }
+  if (editor.loaded) editor.render();
+  if (app.latest) {
+    renderFleet(app.latest);
+    renderMissions(app.latest.fleet);
+    pages[mode]?.render(app.latest, true);
+  }
+}
+
+function initTheme() {
+  let theme = "dark";
+  try { theme = localStorage.getItem(THEME_KEY) || "dark"; } catch { /* storage unavailable */ }
+  document.documentElement.dataset.theme = theme;
+  $("#btn-theme").addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"));
+  // Reports print on white whatever the screen theme.
+  let before = null;
+  window.addEventListener("beforeprint", () => { before = document.documentElement.dataset.theme; if (before !== "light") applyTheme("light"); });
+  window.addEventListener("afterprint", () => { if (before && before !== "light") applyTheme(before); before = null; });
 }
 
 function interpolatedRobots(now) {
@@ -271,11 +316,11 @@ function renderFleet(state) {
     const eta = r.eta !== null && !["ARRIVED", "DOCKED", "PARKED", "CHARGING"].includes(r.status) ? r.eta.toFixed(0) + " s" : "—";
     return `
       <div class="robot-row${app.selected === r.id ? " selected" : ""}" data-id="${r.id}">
-        <div class="robot-badge" style="background:${r.color}">${escapeHtml(r.id)}</div>
+        <div class="robot-badge" style="background:${displayColor(r.color)}">${escapeHtml(r.id)}</div>
         <div class="robot-main">
           <div class="robot-route">${heading}</div>
           <div class="robot-meta">${batteryBadge(r.battery)}<span>${r.speed.toFixed(2)} m/s</span><span>ETA ${eta}</span><span>${r.trips} ${dispatched ? "mission" : "trip"}${r.trips === 1 ? "" : "s"}</span>${dispatched && r.mission ? `<span>${ACTIVITY[r.activity] || ""}</span>` : ""}${r.via.length ? `<span>${r.via.length} via</span>` : ""}</div>
-          <div class="progress"><span style="width:${pct}%;background:${r.color}"></span></div>
+          <div class="progress"><span style="width:${pct}%;background:${displayColor(r.color)}"></span></div>
         </div>
         <span class="status-chip ${cls}" title="${escapeHtml(r.stop_reason || "")}"><svg><use href="#${icon}"/></svg>${label}${waitingOn}</span>
       </div>`;
@@ -312,7 +357,7 @@ function renderMissions(fleet) {
   if (fleet.active.length) {
     parts.push(`<li class="mission-group">In progress</li>`);
     for (const mission of fleet.active) {
-      parts.push(row(mission, `<span class="robot-badge" style="background:${robotColor.get(mission.robot) || "#555"}">${mission.robot}</span>${MISSION_PHASE[mission.status] || mission.status} ${prio(mission.priority)}`));
+      parts.push(row(mission, `<span class="robot-badge" style="background:${displayColor(robotColor.get(mission.robot)) || "#555"}">${mission.robot}</span>${MISSION_PHASE[mission.status] || mission.status} ${prio(mission.priority)}`));
     }
   }
   if (fleet.queued.length) {
@@ -325,6 +370,7 @@ function renderMissions(fleet) {
 }
 
 async function newOrder() {
+  if (!app.layout) return;
   const stations = app.layout.stations.filter((s) => !["parking", "charging"].includes(s.type));
   const options = stations.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label || s.id)}</option>`).join("");
   const form = await dialog({
@@ -422,9 +468,14 @@ function initControls() {
   });
 
   for (const tab of document.querySelectorAll(".tab")) tab.addEventListener("click", () => setMode(tab.dataset.mode));
+  $("#btn-estop").addEventListener("click", () => {
+    if (app.latest?.estop) releaseEstop();
+    else send("estop", { value: true });
+  });
+  $("#btn-estop-release").addEventListener("click", releaseEstop);
   // Typing /#editor or /#live into the address bar of an open page only
   // changes the hash (no reload), so follow it here.
-  window.addEventListener("hashchange", () => setMode(location.hash === "#editor" ? "editor" : "live"));
+  window.addEventListener("hashchange", () => setMode(modeFromHash()));
   window.addEventListener("beforeunload", (event) => { if (editor.dirty) { event.preventDefault(); event.returnValue = ""; } });
 
   $("#btn-new-order").addEventListener("click", () => newOrder());
@@ -448,7 +499,8 @@ function initControls() {
   document.addEventListener("keydown", (event) => {
     if ($("#dlg").open) return;
     if (mode === "editor") { editor.onKey(event); return; }
-    if (event.target.closest("input, select, textarea")) return;
+    if (mode !== "live") return; // simulation shortcuts only on Overview
+    if (event.target.closest("input, select, textarea, button")) return;
     if (event.code === "Space") { event.preventDefault(); send(app.running ? "pause" : "play"); }
     else if (event.code === "ArrowRight") send("step");
     else if (event.key === "r" || event.key === "R") send("reset");
@@ -541,13 +593,32 @@ function toast(message) {
   toastTimer = setTimeout(() => { node.hidden = true; }, 4000);
 }
 
-// Debug handle for the browser console and end-to-end tests.
-window.nexus = { app, map, editor, setMode: (m) => setMode(m) };
+// Operations pages share the live connection.
+const pageContext = {
+  send,
+  state: () => app.latest,
+  newOrder,
+  stationName: (cell) => stationName(cell),
+  locate: (id) => { setMode("live"); select(id); },
+};
+const pages = {
+  missions: new MissionsPage(pageContext),
+  fleet: new FleetPage(pageContext),
+  alerts: new AlertsPage(pageContext),
+  reports: new ReportsPage(pageContext),
+};
 
+// Debug handle for the browser console and end-to-end tests.
+window.nexus = { app, map, editor, pages, setMode: (m) => setMode(m), mode: () => mode };
+
+document.body.dataset.mode = mode;
+initTheme();
+initTooltips();
 initControls();
 initSplitter();
 loadCatalog().then(() => editor.populateCatalog()).then(loadLayoutList).then(() => {
   connect();
-  if (location.hash === "#editor") setMode("editor");
+  const initial = modeFromHash();
+  if (initial !== "live") setMode(initial);
 });
 requestAnimationFrame(frame);

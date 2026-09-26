@@ -34,9 +34,22 @@ from algorithms.lane_grid import LaneGrid
 from algorithms.negotiation import NegotiationManager
 from algorithms.planner import NEXUSPlanner
 from communication.p2p import P2PNetwork
+from nexus.alerts import AlertManager
 from nexus.fleet import FleetManager
 from nexus.grid_world import GridWorld
 from nexus.layout import Cell, Layout
+
+# Status -> time category (Fleet page and shift report).
+TIME_CATEGORY = {
+    "MOVING": "moving", "TURNING": "moving", "REROUTING": "moving", "BACKING_OFF": "moving",
+    "DOCKED": "handling",
+    "WAITING": "waiting", "YIELDING": "waiting",
+    "CHARGING": "charging",
+    "PARKED": "idle", "ARRIVED": "idle", "IDLE": "idle", "ERROR": "idle",
+    "HELD": "held",
+    "E_STOP": "stopped",
+}
+TIME_CATEGORIES = ("moving", "handling", "waiting", "charging", "idle", "held", "stopped")
 
 AT_CENTER = 1e-3          # metres from a cell centre that count as "on" it (motion lands exactly)
 PARK_REROUTE_AFTER = 2.0  # s blocked by a parked/idle robot before rerouting
@@ -119,6 +132,7 @@ class GridSimulation:
         self.stuck_since: Dict[Tuple[str, str], float] = {}
         self.stuck_reported = set()
         self.events: List[Dict[str, Any]] = []
+        self.event_seq = 0
         self.counters = {
             "conflicts_predicted": 0,
             "negotiations": 0,
@@ -129,12 +143,15 @@ class GridSimulation:
             "trips_completed": 0,
         }
         self.min_separation = float("inf")
+        self.estop = False
+        self.estop_since: Optional[float] = None
         self.status = "READY"
         self.errors: List[str] = [i["message"] for i in layout.validate() if i["severity"] == "error"]
 
         if not self.errors:
             self._create_agents()
         self.fleet = FleetManager(self)
+        self.alerts = AlertManager(self)
 
         dispatched = len(self.fleet.robots)
         self._event("system", f"Layout '{layout.name}' loaded: {len(self.agents)} robots"
@@ -188,6 +205,10 @@ class GridSimulation:
                 "mission": None,
                 "battery": float(config.get("battery", 100.0)) if dispatched else None,
                 "needs_charge": False,
+                "hold": False,
+                "stall_since": None,
+                "charges": 0,
+                "time_in": {c: 0.0 for c in TIME_CATEGORIES},
             }
 
             if dispatched:
@@ -226,7 +247,8 @@ class GridSimulation:
         return float(self.world.time)
 
     def _event(self, kind: str, text: str, robot: Optional[str] = None, **extra):
-        self.events.append({"t": round(self.world.time if hasattr(self, "world") else 0.0, 1),
+        self.event_seq = getattr(self, "event_seq", 0) + 1
+        self.events.append({"seq": self.event_seq, "t": round(self.world.time if hasattr(self, "world") else 0.0, 1),
                             "kind": kind, "text": text, "robot": robot, **extra})
         if len(self.events) > 300:
             self.events = self.events[-300:]
@@ -269,6 +291,43 @@ class GridSimulation:
 
     def _parked(self, agent: RobotAgent) -> bool:
         return agent.intent in {"ARRIVED", "IDLE"} and agent.robot_id not in self.yielding
+
+    # ------------------------------------------------------------------
+    # Operator controls
+    # ------------------------------------------------------------------
+
+    def set_estop(self, engaged: bool):
+        """Fleet-wide emergency stop: every robot halts where it is and the
+        dispatcher stops assigning until the E-stop is released."""
+        engaged = bool(engaged)
+        if engaged == self.estop:
+            return
+        self.estop = engaged
+        if engaged:
+            self.estop_since = self.world.time
+            for agent in self.agents:
+                agent.robot.speed = 0.0
+            self._event("error", "E-STOP engaged: all robots stopped")
+        else:
+            self._event("system", f"E-stop released after {self.world.time - self.estop_since:.0f} s")
+            self.estop_since = None
+        self._update_status(account=False)
+        self.alerts.evaluate(self.world.time, force=True)
+
+    def set_hold(self, robot_id: str, hold: bool):
+        """Operator hold of a single robot (it stops where it is)."""
+        agent = self._agent(robot_id)
+        if agent is None:
+            raise ValueError(f"No robot {robot_id}")
+        meta = self.meta[robot_id]
+        if meta["hold"] == bool(hold):
+            return
+        meta["hold"] = bool(hold)
+        if hold:
+            agent.robot.speed = 0.0
+        self._event("system", f"{robot_id} {'held by operator' if hold else 'released by operator'}", robot_id)
+        self._update_status(account=False)
+        self.alerts.evaluate(self.world.time, force=True)
 
     def command(self, agent: RobotAgent, cell: Cell) -> bool:
         """Send a robot to a cell (used by the fleet manager). A robot that is
@@ -325,14 +384,19 @@ class GridSimulation:
         # 4. Cell reservations -------------------------------------------
         routes, wait_for = self._reserve(now)
 
-        # 5. Deadlocks and long blocks ------------------------------------
-        self._resolve_blocks(wait_for, now)
-        self._resume_yielders(now)
+        # 5. Deadlocks and long blocks (not while everything is frozen) ---
+        if not self.estop:
+            self._resolve_blocks(wait_for, now)
+            self._resume_yielders(now)
         # Paths may have changed above: routes must match the paths the
         # world is about to drive (waypoint progress is counted per route).
         routes, _ = self._reserve(now)
 
-        # 6. Motion --------------------------------------------------------
+        # 6. Motion (E-stop / operator hold: robots stay where they are) ---
+        routes = [
+            [] if self.estop or self.meta[agent.robot_id]["hold"] else route
+            for agent, route in zip(self.agents, routes)
+        ]
         speeds, caps = self._zone_limits(routes)
         reached = self.world.step(routes, speeds, caps)
         for agent, count in zip(self.agents, reached):
@@ -348,6 +412,7 @@ class GridSimulation:
         for agent in self.agents:
             self._log_arrival(agent, self.world.time)
         self._update_status()
+        self.alerts.evaluate(self.world.time)
 
         if self.agents and not self.fleet.active \
                 and all(self.meta[a.robot_id]["status"] == "ARRIVED" for a in self.agents) \
@@ -610,6 +675,7 @@ class GridSimulation:
             if agent is None or blocker is None or agent.stopped:
                 continue
             if not (self._parked(blocker) or blocker.robot_id in self.yielding
+                    or self.meta[blocker_id]["hold"]
                     or self.meta[blocker_id]["blocked_since"] is not None):
                 continue
 
@@ -663,6 +729,8 @@ class GridSimulation:
 
     def _back_off(self, yielder: RobotAgent, winner: RobotAgent, now: float) -> bool:
         """Move yielder to the nearest free cell off the winner's path."""
+        if self.meta[yielder.robot_id]["hold"]:
+            return False  # an operator hold is never overridden
         start = self._cell(yielder.state.position)
         avoid = set(self._remaining_cells(winner)) | set(self._occupied(winner))
         parents: Dict[Cell, Optional[Cell]] = {start: None}
@@ -742,13 +810,19 @@ class GridSimulation:
                     self.counters["safety_violations"] += 1
                     self._event("error", f"SAFETY: {a.robot_id} and {b.robot_id} {distance:.2f} m apart", a.robot_id)
 
-    def _update_status(self):
+    def _update_status(self, account: bool = True):
+        """Derive each robot's status; account=True also books this step's
+        time to the status's category (False for out-of-step refreshes)."""
         now = self.world.time
         for agent in self.agents:
             meta = self.meta[agent.robot_id]
             robot = agent.robot
             if meta["error"]:
                 status = "ERROR"
+            elif self.estop:
+                status = "E_STOP"
+            elif meta["hold"]:
+                status = "HELD"
             elif agent.robot_id in self.yielding:
                 status = "BACKING_OFF" if agent.waypoint_index < len(agent.planned_path) else "YIELDING"
             elif agent.stopped:
@@ -772,6 +846,13 @@ class GridSimulation:
             else:
                 status = "IDLE"
             meta["status"] = status
+            if account:
+                meta["time_in"][TIME_CATEGORY.get(status, "idle")] += self.time_step
+            if status in ("WAITING", "YIELDING"):
+                if meta["stall_since"] is None:
+                    meta["stall_since"] = now
+            else:
+                meta["stall_since"] = None
             # Keep agent intent in NEXUS vocabulary for the detector / peers.
             if status == "WAITING":
                 agent.intent = "STOPPED"
@@ -798,6 +879,8 @@ class GridSimulation:
             "distance_m": round(distance, 1),
             "utilisation": round(moving / max(len(self.agents), 1), 3),
             "min_separation": None if self.min_separation == float("inf") else round(self.min_separation, 2),
+            "held": sum(1 for a in self.agents if self.meta[a.robot_id]["hold"]),
+            "estop": self.estop,
             **self.counters,
         }
 
@@ -834,6 +917,9 @@ class GridSimulation:
                 "mission": meta["mission"],
                 "battery": None if meta["battery"] is None else round(meta["battery"], 1),
                 "home": list(meta["home_cell"]),
+                "hold": meta["hold"],
+                "charges": meta["charges"],
+                "time_in": {k: round(v, 1) for k, v in meta["time_in"].items()},
             })
         return {
             "time": round(self.world.time, 2),
@@ -852,6 +938,9 @@ class GridSimulation:
             ],
             "metrics": self.metrics(),
             "fleet": self.fleet.snapshot() if self.fleet.active else None,
+            "estop": self.estop,
+            "estop_since": self.estop_since,
+            "alerts": self.alerts.snapshot(),
         }
 
     def run(self, max_steps: Optional[int] = None) -> Dict[str, Any]:

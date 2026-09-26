@@ -179,6 +179,54 @@ class FleetManager:
         self.sim._event("mission", f"{mission_id} cancelled", mission.robot)
         return mission
 
+    def charge_now(self, robot_id: str) -> str:
+        """Operator: send a dispatched robot to charge. An order not yet
+        loaded goes back to the queue; a loaded one is delivered first."""
+        agent = self.sim._agent(robot_id)
+        if agent is None or agent not in self.robots:
+            raise ValueError(f"{robot_id} is not a dispatched robot")
+        meta = self.sim.meta[robot_id]
+        if meta["activity"] in ("CHARGING", "TO_CHARGER"):
+            return "already charging"
+        mission = self.missions.get(meta["mission"]) if meta["mission"] else None
+        if mission and mission.status in ("loading", "to_dropoff", "unloading"):
+            meta["charge_after"] = True
+            self.sim._event("battery", f"{robot_id} will charge after delivering {mission.id}", robot_id)
+            return "after delivery"
+        if mission:
+            mission.status, mission.robot, mission.assigned_at = "queued", None, None
+            self.queue.insert(0, mission.id)
+            meta["mission"] = None
+            self.counters["requeued"] += 1
+        meta["needs_charge"] = True
+        self.sim._event("battery", f"{robot_id} sent to charge by operator", robot_id)
+        self._go_charge(agent, self.sim.world.time)
+        return "now"
+
+    def flow_stats(self) -> List[Dict[str, Any]]:
+        """Per mission flow: configured rate, orders created / delivered, lead time."""
+        stats = []
+        for flow in self.layout.flows:
+            mine = [m for m in self.missions.values() if m.flow == flow["id"]]
+            done = [m.completed_at - m.created for m in mine if m.status == "completed"]
+            stats.append({
+                "id": flow["id"], "name": flow["name"], "rate": flow["rate"], "priority": flow["priority"],
+                "enabled": flow["enabled"], "created": len(mine), "completed": len(done),
+                "open": sum(1 for m in mine if m.status not in ("completed", "cancelled")),
+                "avg_lead_time": round(sum(done) / len(done), 1) if done else None,
+            })
+        return stats
+
+    def all_missions(self) -> List[Dict[str, Any]]:
+        return [self._mission_view(m) for m in sorted(self.missions.values(), key=lambda m: m.id)]
+
+    def _generate_round(self, now: float):
+        if not self.cfg.get("generator"):
+            return
+        for flow in self.layout.flows:
+            if flow["enabled"] and flow["rate"] > 0 and self.rng.random() < flow["rate"] * DISPATCH_PERIOD / 3600.0:
+                self._generate(flow, now)
+
     def _generate(self, flow: Dict[str, Any], now: float):
         if len(self.queue) >= int(self.cfg.get("max_queue", 40)):
             return
@@ -241,10 +289,17 @@ class FleetManager:
     # ================================================================ update
 
     def update(self, now: float):
-        """Robot state machines every step; generator + dispatcher every second."""
+        """Robot state machines every step; generator + dispatcher every second.
+        During an E-stop (or an operator hold of one robot) timers freeze and
+        nothing is assigned; orders keep arriving in the queue."""
         cfg = self.cfg
+        dt = self.sim.time_step
         for agent in self.robots:
             meta = self.sim.meta[agent.robot_id]
+            if self.sim.estop or meta["hold"]:
+                if meta["busy_until"] is not None:
+                    meta["busy_until"] += dt
+                continue
             activity = meta["activity"]
             mission = self.missions.get(meta["mission"]) if meta["mission"] else None
 
@@ -280,12 +335,13 @@ class FleetManager:
                 self.sim.counters["trips_completed"] += 1
                 self.sim._event("arrival", f"{mission.id} delivered by {agent.robot_id}: {mission.name} "
                                 f"({now - mission.created:.0f} s)", agent.robot_id)
-                if meta["battery"] < cfg["battery_low"]:
+                if meta["battery"] < cfg["battery_low"] or meta.pop("charge_after", False):
                     self._go_charge(agent, now)
                 else:
                     self._go_home(agent)
             elif activity == "TO_CHARGER" and self._arrived(agent):
                 meta["activity"] = "CHARGING"
+                meta["charges"] += 1
                 self.counters["charges"] += 1
             elif activity == "CHARGING" and meta["battery"] >= cfg["charge_target"]:
                 self.sim._event("battery", f"{agent.robot_id} charged to {meta['battery']:.0f}%, back in service", agent.robot_id)
@@ -299,11 +355,9 @@ class FleetManager:
 
         if now + 1e-9 >= self.next_round:
             self.next_round = now + DISPATCH_PERIOD
-            if cfg.get("generator"):
-                for flow in self.layout.flows:
-                    if flow["enabled"] and flow["rate"] > 0 and self.rng.random() < flow["rate"] * DISPATCH_PERIOD / 3600.0:
-                        self._generate(flow, now)
-            self._dispatch(now)
+            self._generate_round(now)
+            if not self.sim.estop:  # orders still arrive during an E-stop
+                self._dispatch(now)
 
     def _dispatch(self, now: float):
         cfg = self.cfg
@@ -313,6 +367,8 @@ class FleetManager:
             if meta["activity"] not in ("IDLE", "RETURNING") or meta.get("needs_charge"):
                 continue
             if meta["battery"] < cfg["battery_low"] or agent.robot_id in self.sim.yielding or agent.stopped:
+                continue
+            if meta["hold"]:
                 continue
             free.append(agent)
         if not free or not self.queue:
@@ -384,9 +440,9 @@ class FleetManager:
         active = [m for m in self.missions.values() if m.status in ("assigned", "loading", "to_dropoff", "unloading")]
         done = sorted((m for m in self.missions.values() if m.status in ("completed", "cancelled")),
                       key=lambda m: m.completed_at or 0.0, reverse=True)
-        # Keep memory bounded on long runs.
-        if len(self.missions) > 600:
-            for m in done[200:]:
+        # Keep memory bounded on very long runs (reports use the history).
+        if len(self.missions) > 6000:
+            for m in done[5000:]:
                 self.missions.pop(m.id, None)
         return {
             "queued": [self._mission_view(m) for m in queued[:30]],

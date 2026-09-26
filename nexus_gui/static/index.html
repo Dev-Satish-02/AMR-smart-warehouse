@@ -29,6 +29,7 @@
       <symbol id="s-charging" viewBox="0 0 24 24"><path d="M13.5 2.5 5 13.5h6l-1 8 8.5-11h-6z" fill="currentColor"/></symbol>
       <symbol id="s-battery" viewBox="0 0 24 24"><rect x="2.5" y="7" width="17" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M21.5 10.5v3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
       <symbol id="s-mission" viewBox="0 0 24 24"><path d="M4 7l8-4 8 4v10l-8 4-8-4zM4 7l8 4 8-4M12 11v10" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="s-hold" viewBox="0 0 24 24"><path d="M7.5 5h3.2v14H7.5zM13.3 5h3.2v14h-3.2z" fill="currentColor"/></symbol>
       <symbol id="s-idle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
       <!-- station icons -->
       <symbol id="st-loading" viewBox="0 0 24 24"><path d="M12 3v10M7.5 8.5 12 13l4.5-4.5M4 16v4h16v-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
@@ -49,6 +50,13 @@
       <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M12 1.5V5M12 19v3.5M1.5 12H5M19 12h3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
       <symbol id="i-loop" viewBox="0 0 24 24"><path d="M17 3l3 3-3 3M20 6H9a5 5 0 0 0-5 5M7 21l-3-3 3-3M4 18h11a5 5 0 0 0 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-estop" viewBox="0 0 24 24"><path d="M8.2 2.5h7.6l5.7 5.7v7.6l-5.7 5.7H8.2l-5.7-5.7V8.2z" fill="currentColor"/><path d="M8 12h8" stroke="var(--estop-bar, #fff)" stroke-width="2.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-print" viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4v-7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7h-2M7 14h10v7H7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-hold" viewBox="0 0 24 24"><path d="M8 5h3v14H8zM13 5h3v14h-3z" fill="currentColor"/></symbol>
+      <symbol id="i-locate" viewBox="0 0 24 24"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="10" r="2.3" fill="currentColor"/></symbol>
       <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM7 3v6h8V3M7 21v-7h10v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
@@ -87,16 +95,24 @@
         </div>
         <div>
           <div class="brand-name">NEXUS</div>
-          <div class="brand-sub">Decentralized fleet coordination</div>
+          <div class="brand-sub">AMR fleet management &amp; coordination</div>
         </div>
       </div>
 
-      <nav class="tabs" role="tablist">
-        <button class="tab active" data-mode="live" role="tab" aria-selected="true">Live</button>
-        <button class="tab" data-mode="editor" role="tab" aria-selected="false">Editor</button>
+      <nav class="tabs" role="tablist" aria-label="Sections">
+        <button class="tab active" data-mode="live" role="tab" aria-selected="true">Overview</button>
+        <button class="tab" data-mode="missions" role="tab" aria-selected="false">Missions</button>
+        <button class="tab" data-mode="fleet" role="tab" aria-selected="false">Fleet</button>
+        <button class="tab" data-mode="alerts" role="tab" aria-selected="false">Alerts<span class="badge" id="alert-badge" hidden></span></button>
+        <button class="tab" data-mode="reports" role="tab" aria-selected="false">Reports</button>
+        <button class="tab" data-mode="editor" role="tab" aria-selected="false">Layout Editor</button>
       </nav>
 
       <div class="topbar-right">
+        <button class="estop" id="btn-estop" title="Fleet-wide emergency stop (all robots halt immediately)">
+          <svg><use href="#i-estop"/></svg><span>E-STOP</span>
+        </button>
+        <button class="icon-btn" id="btn-theme" title="Switch light / dark theme"><svg><use href="#i-theme"/></svg></button>
         <label class="select">
           <span class="select-label">Layout</span>
           <select id="layout-select"></select>
@@ -104,6 +120,13 @@
         <div class="conn" id="conn"><span class="dot"></span><span class="conn-label">Connecting…</span></div>
       </div>
     </header>
+
+    <div class="estop-banner" id="estop-banner" hidden>
+      <svg><use href="#i-estop"/></svg>
+      <strong>E-STOP ENGAGED</strong>
+      <span id="estop-text">All robots stopped. Orders keep queueing; nothing is dispatched.</span>
+      <button class="btn" id="btn-estop-release">Release E-stop</button>
+    </div>
 
     <main class="main" id="main">
       <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-label="Resize side panel"
@@ -295,10 +318,102 @@
           <ul class="ed-issues" id="ed-issues"></ul>
         </section>
       </aside>
+      <!-- ============================================================ MISSIONS -->
+      <section class="page" data-view="missions" hidden>
+        <div class="page-head">
+          <div>
+            <h1>Missions</h1>
+            <div class="stage-meta" id="mp-meta"></div>
+          </div>
+          <div class="page-actions">
+            <label class="switch" title="Create orders automatically from the layout's mission flows"><input type="checkbox" id="mp-gen" /> <span>Auto orders</span></label>
+            <button class="btn primary" id="mp-new">+ New order</button>
+          </div>
+        </div>
+        <div class="page-grid missions-grid">
+          <section class="card">
+            <div class="filters">
+              <div class="seg" id="mp-status" role="radiogroup" aria-label="Status">
+                <button data-value="open" class="active">Open</button>
+                <button data-value="queued">Queued</button>
+                <button data-value="active">In progress</button>
+                <button data-value="completed">Completed</button>
+                <button data-value="cancelled">Cancelled</button>
+                <button data-value="all">All</button>
+              </div>
+              <select id="mp-priority" aria-label="Priority"><option value="">All priorities</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select>
+              <select id="mp-flow" aria-label="Flow"><option value="">All flows</option></select>
+              <input type="search" id="mp-search" placeholder="Search ID, station, robot" aria-label="Search" />
+            </div>
+            <div class="table-wrap" id="mp-table"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>Mission flows</h2><span class="card-hint">configured in the Layout Editor</span></div>
+            <div class="table-wrap" id="mp-flows"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ============================================================ FLEET -->
+      <section class="page" data-view="fleet" hidden>
+        <div class="page-head">
+          <div>
+            <h1>Fleet</h1>
+            <div class="stage-meta" id="fl-meta"></div>
+          </div>
+          <div class="chart-legend" id="fl-legend"></div>
+        </div>
+        <div class="robot-cards" id="fl-cards"></div>
+      </section>
+
+      <!-- ============================================================ ALERTS -->
+      <section class="page" data-view="alerts" hidden>
+        <div class="page-head">
+          <div>
+            <h1>Alerts</h1>
+            <div class="stage-meta" id="al-meta"></div>
+          </div>
+          <div class="page-actions">
+            <div class="seg" id="al-filter" role="radiogroup" aria-label="Severity">
+              <button data-value="" class="active">All</button>
+              <button data-value="critical">Critical</button>
+              <button data-value="warning">Warning</button>
+              <button data-value="info">Info</button>
+            </div>
+            <button class="btn" id="al-ack-all">Acknowledge all</button>
+          </div>
+        </div>
+        <section class="card">
+          <div class="card-head"><h2>Active</h2><span class="card-hint">clear on their own when the condition ends</span></div>
+          <div class="alert-list" id="al-active"></div>
+        </section>
+        <section class="card">
+          <div class="card-head"><h2>History</h2><span class="card-hint">resolved alerts, newest first</span></div>
+          <div class="table-wrap" id="al-history"></div>
+        </section>
+      </section>
+
+      <!-- ============================================================ REPORTS -->
+      <section class="page" data-view="reports" hidden>
+        <div class="page-head">
+          <div>
+            <h1>Shift report</h1>
+            <div class="stage-meta" id="rp-meta"></div>
+          </div>
+          <div class="page-actions no-print">
+            <button class="btn" id="rp-refresh"><svg><use href="#i-refresh"/></svg>Refresh</button>
+            <a class="btn" id="rp-missions-csv" href="/api/report/missions.csv" download><svg><use href="#i-download"/></svg>Missions CSV</a>
+            <a class="btn" id="rp-robots-csv" href="/api/report/robots.csv" download><svg><use href="#i-download"/></svg>Robots CSV</a>
+            <button class="btn primary" id="rp-print"><svg><use href="#i-print"/></svg>Print / Save PDF</button>
+          </div>
+        </div>
+        <div id="rp-body"></div>
+      </section>
     </main>
   </div>
 
   <div class="toast" id="toast" hidden></div>
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
 
   <dialog class="dialog" id="dlg">
     <form method="dialog" id="dlg-form">

@@ -17,11 +17,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from nexus.catalog import catalog
 from nexus.grid_simulation import GridSimulation
+from nexus.report import build_report, missions_csv, robots_csv
 from nexus.layout import Layout, LayoutError, STATION_TYPES, load_layout, normalize, save_layout
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -89,7 +90,9 @@ class Controller:
         }
 
     def state_message(self, include_all_events: bool = False) -> Dict[str, Any]:
-        events = self.sim.events if include_all_events else self.sim.events[self.sent_events:]
+        # Events carry a sequence number; the simulation trims its log, so
+        # "new since last broadcast" must not be a list position.
+        events = self.sim.events if include_all_events else [e for e in self.sim.events if e["seq"] > self.sent_events]
         return {
             "type": "state",
             "running": self.running,
@@ -113,7 +116,7 @@ class Controller:
 
     async def broadcast_state(self, include_all_events: bool = False):
         message = self.state_message(include_all_events)
-        self.sent_events = len(self.sim.events)
+        self.sent_events = self.sim.event_seq
         await self.broadcast(message)
 
     # -- commands --------------------------------------------------------
@@ -141,6 +144,14 @@ class Controller:
             elif cmd == "speed":
                 value = float(command.get("value", 1.0))
                 self.speed = min(SPEEDS, key=lambda s: abs(s - value))
+            elif cmd == "estop":
+                self.sim.set_estop(bool(command.get("value")))
+            elif cmd == "robot.hold":
+                self.sim.set_hold(str(command.get("id")), bool(command.get("value")))
+            elif cmd == "robot.charge":
+                self.sim.fleet.charge_now(str(command.get("id")))
+            elif cmd == "alert.ack":
+                self.sim.alerts.acknowledge(command.get("id"))
             elif cmd == "mission.create":
                 self.sim.fleet.create(str(command.get("pickup")), str(command.get("dropoff")),
                                       str(command.get("priority", "normal")))
@@ -229,6 +240,65 @@ def api_catalog():
     return {**catalog(), "station_types": list(STATION_TYPES)}
 
 
+@app.post("/api/estop")
+async def api_estop(payload: Dict[str, Any]):
+    """Engage ({"engaged": true}) or release ({"engaged": false}) the fleet-wide E-stop."""
+    if controller.sim is None:
+        raise HTTPException(409, "No layout loaded")
+    async with controller.lock:
+        controller.sim.set_estop(bool(payload.get("engaged")))
+    await controller.broadcast_state()
+    return {"estop": controller.sim.estop}
+
+
+@app.get("/api/alerts")
+def api_alerts():
+    if controller.sim is None:
+        return {"active": [], "recent": [], "counts": {}, "totals": {}}
+    return controller.sim.alerts.snapshot()
+
+
+@app.post("/api/alerts/ack")
+async def api_ack(payload: Dict[str, Any]):
+    """Acknowledge one alert ({"id": "A-0003"}) or all active alerts ({})."""
+    if controller.sim is None:
+        raise HTTPException(409, "No layout loaded")
+    async with controller.lock:
+        try:
+            count = controller.sim.alerts.acknowledge(payload.get("id"))
+        except ValueError as error:
+            raise HTTPException(404, str(error))
+    await controller.broadcast_state()
+    return {"acknowledged": count}
+
+
+@app.get("/api/report")
+def api_report():
+    if controller.sim is None:
+        raise HTTPException(409, "No layout loaded")
+    return build_report(controller.sim)
+
+
+def _csv_response(text: str, name: str) -> PlainTextResponse:
+    stamp = f"{controller.layout_name or 'layout'}_{int(controller.sim.world.time)}s"
+    return PlainTextResponse(text, media_type="text/csv",
+                             headers={"Content-Disposition": f'attachment; filename="nexus_{name}_{stamp}.csv"'})
+
+
+@app.get("/api/report/missions.csv")
+def api_missions_csv():
+    if controller.sim is None:
+        raise HTTPException(409, "No layout loaded")
+    return _csv_response(missions_csv(controller.sim), "missions")
+
+
+@app.get("/api/report/robots.csv")
+def api_robots_csv():
+    if controller.sim is None:
+        raise HTTPException(409, "No layout loaded")
+    return _csv_response(robots_csv(controller.sim), "robots")
+
+
 @app.post("/api/missions")
 async def api_create_mission(payload: Dict[str, Any]):
     """Create a transport order in the running simulation (e.g. from a WMS/MES).
@@ -256,6 +326,16 @@ async def api_cancel_mission(mission_id: str):
             raise HTTPException(422, str(error))
     await controller.broadcast_state()
     return mission.to_dict()
+
+
+@app.get("/api/missions/all")
+def api_missions_all():
+    """Every order of this run plus per-flow statistics (Missions page)."""
+    if controller.sim is None or not controller.sim.fleet.active:
+        return {"missions": [], "flows": [], "generator": False, "time": 0.0}
+    fleet = controller.sim.fleet
+    return {"missions": fleet.all_missions(), "flows": fleet.flow_stats(),
+            "generator": bool(fleet.cfg.get("generator")), "time": controller.sim.world.time}
 
 
 @app.get("/api/missions")
