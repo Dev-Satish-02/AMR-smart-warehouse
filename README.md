@@ -6,6 +6,12 @@ NEXUS coordinates a fleet of warehouse robots **without a central traffic contro
 
 The project includes a lane-based multi-robot warehouse simulator, a live web fleet dashboard (the **NEXUS Control Room**), a visual layout editor, and a benchmark harness that compares NEXUS with traditional stop-and-wait traffic control.
 
+## Demo video
+
+[![NEXUS demo video](https://img.youtube.com/vi/oSFoE7Ld5Dc/maxresdefault.jpg)](https://www.youtube.com/watch?v=oSFoE7Ld5Dc)
+
+▶ **[Watch the demo on YouTube](https://www.youtube.com/watch?v=oSFoE7Ld5Dc)**
+
 ---
 
 ## Results
