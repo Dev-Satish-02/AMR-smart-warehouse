@@ -2,7 +2,7 @@ import { MapView } from "./map.js";
 import { Editor, dialog } from "./editor.js";
 import { loadCatalog, objectType } from "./catalog.js";
 import { displayColor, STATUS, ACTIVITY, fmtDuration } from "./format.js";
-import { MissionsPage, FleetPage, AlertsPage, ReportsPage, initTooltips, hideTooltip, renderAlertBadge } from "./pages.js";
+import { MissionsPage, FleetPage, AlertsPage, ReportsPage, BenchmarkPage, initTooltips, hideTooltip, renderAlertBadge } from "./pages.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -74,6 +74,7 @@ function setConn(ok) {
 function onLayout(msg) {
   app.layout = msg.layout;
   app.layoutName = msg.name;
+  app.benchmark = msg.benchmark || null;
   app.buffer = [];
   app.events = [];
   app.selected = null;
@@ -81,11 +82,12 @@ function onLayout(msg) {
   app.stationsByCell = new Map(msg.layout.stations.map((s) => [`${s.x},${s.y}`, s]));
   map.setLayout(msg.layout);
 
-  $("#layout-title").textContent = msg.layout.name;
+  $("#layout-title").textContent = app.benchmark ? `Benchmark replay: ${app.benchmark.title}` : msg.layout.name;
   const lanes = msg.layout.rows.join("").replace(/[^+<>^v]/g, "").length;
   $("#layout-meta").textContent =
     `${msg.layout.width} × ${msg.layout.height} m grid · ${lanes} lane cells · ` +
-    `${msg.layout.stations.length} stations · ${msg.layout.robots.length} robots`;
+    `${msg.layout.stations.length} stations · ${msg.layout.robots.length} robots` +
+    (app.benchmark ? ` · seed ${app.benchmark.seed}, same orders as the benchmark` : "");
   syncSelect();
 
   const errors = msg.issues.filter((i) => i.severity === "error");
@@ -113,12 +115,20 @@ async function loadLayoutList() {
 // in the Editor it picks what you edit.
 function syncSelect() {
   const select = $("#layout-select");
+  select.querySelector("option[data-benchmark]")?.remove();
+  if (mode !== "editor" && app.benchmark) {
+    const option = document.createElement("option");
+    option.value = app.layoutName;
+    option.dataset.benchmark = "1";
+    option.textContent = `Benchmark: ${app.benchmark.title}`;
+    select.append(option);
+  }
   select.value = mode === "editor" ? (editor.file || "") : (app.layoutName || "");
 }
 
 // ------------------------------------------------------------------ modes
 
-const MODES = ["live", "missions", "fleet", "alerts", "reports", "editor"];
+const MODES = ["live", "missions", "fleet", "alerts", "reports", "benchmark", "editor"];
 
 function modeFromHash() {
   const hash = location.hash.replace("#", "");
@@ -141,7 +151,9 @@ async function setMode(next) {
     tab.setAttribute("aria-selected", active);
   }
   if (mode === "editor") {
-    if (!editor.loaded && app.layoutName) await editor.open(app.layoutName);
+    // A benchmark replay is not a saved layout: open the first saved one instead.
+    const file = app.benchmark ? editor.knownFiles?.[0] : app.layoutName;
+    if (!editor.loaded && file) await editor.open(file);
     else editor.map.fit();
   } else if (mode === "live") {
     map.fit();
@@ -165,6 +177,7 @@ function onState(msg) {
   if (msg.events.length) addEvents(msg.events, !msg.reset_events);
   renderTransport();
   renderStatus(msg.state);
+  renderStrategy(msg.strategy);
   renderKpis(msg.state.metrics, msg.state.fleet);
   renderFleet(msg.state);
   renderMissions(msg.state.fleet);
@@ -267,6 +280,12 @@ function renderStatus(state) {
   $("#clock").textContent = `${state.time.toFixed(1)} s`;
 }
 
+function renderStrategy(strategy) {
+  if (!strategy) return;
+  app.strategy = strategy;
+  for (const b of $("#strategy").children) b.classList.toggle("active", b.dataset.value === strategy);
+}
+
 function renderTransport() {
   $("#btn-play use").setAttribute("href", app.running ? "#i-pause" : "#i-play");
   for (const btn of $("#speed").children) btn.classList.toggle("active", Number(btn.dataset.speed) === app.speed);
@@ -284,7 +303,7 @@ function renderKpis(m, fleet) {
   $("#kpis").innerHTML = [
     f ? kpi("Missions delivered", f.completed, `${f.per_hour.toFixed(0)} per hour · ${f.queued} queued`)
       : kpi("Trips completed", m.trips_completed, `${m.throughput_per_min.toFixed(1)} per minute`),
-    kpi("Fleet moving", `${m.moving}<small>/ ${m.robots}</small>`, `${m.waiting} waiting · ${m.arrived} at station`),
+    kpi("Fleet moving", `${m.moving}<small>/ ${m.robots}</small>`, `${m.waiting} waiting · ${m.stops} full stops so far`),
     kpi("Conflicts negotiated", m.negotiations, `${m.reroutes} reroutes`),
     kpi("Deadlocks resolved", m.deadlocks_resolved, `${m.backoffs} back-offs`),
     kpi("Safety violations", m.safety_violations, safety),
@@ -468,6 +487,12 @@ function initControls() {
   });
 
   for (const tab of document.querySelectorAll(".tab")) tab.addEventListener("click", () => setMode(tab.dataset.mode));
+  $("#strategy").addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button || button.dataset.value === app.strategy) return;
+    send("strategy", { value: button.dataset.value });
+    toast(`Coordination: ${button.dataset.value === "nexus" ? "NEXUS" : "stop & wait (classical baseline)"}. Layout restarted.`);
+  });
   $("#btn-estop").addEventListener("click", () => {
     if (app.latest?.estop) releaseEstop();
     else send("estop", { value: true });
@@ -600,12 +625,19 @@ const pageContext = {
   newOrder,
   stationName: (cell) => stationName(cell),
   locate: (id) => { setMode("live"); select(id); },
+  toast,
+  watchBenchmark: (scenario, strategy) => {
+    send("benchmark.watch", { scenario, strategy });
+    setMode("live");
+    toast(`Replaying ${scenario.replace(/_/g, " ")} with ${strategy === "nexus" ? "NEXUS" : "stop & wait"}: press Play`);
+  },
 };
 const pages = {
   missions: new MissionsPage(pageContext),
   fleet: new FleetPage(pageContext),
   alerts: new AlertsPage(pageContext),
   reports: new ReportsPage(pageContext),
+  benchmark: new BenchmarkPage(pageContext),
 };
 
 // Debug handle for the browser console and end-to-end tests.

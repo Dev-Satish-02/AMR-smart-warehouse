@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -20,13 +23,15 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
+from nexus import benchmark
 from nexus.catalog import catalog
 from nexus.grid_simulation import GridSimulation
 from nexus.report import build_report, missions_csv, robots_csv
-from nexus.layout import Layout, LayoutError, STATION_TYPES, load_layout, normalize, save_layout
+from nexus.layout import Layout, LayoutError, STATION_TYPES, STRATEGIES, load_layout, normalize, save_layout
 
 ROOT = Path(__file__).resolve().parent.parent
 LAYOUT_DIR = ROOT / "layouts"
+BENCHMARK_FILE = ROOT / "data" / "benchmark" / "latest.json"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 TICK_SECONDS = 0.05
@@ -70,21 +75,68 @@ class Controller:
         self.sim: Optional[GridSimulation] = None
         self.sent_events = 0
         self.lock = asyncio.Lock()
+        # Coordination strategy chosen in the GUI (None: the layout's own).
+        self.strategy: Optional[str] = None
+        # A benchmark scenario replayed live: (scenario, seed, tasks).
+        self.watch: Optional[Dict[str, Any]] = None
 
     # -- layout ----------------------------------------------------------
+
+    def _with_strategy(self, layout_dict: Dict[str, Any]) -> Layout:
+        if self.strategy:
+            layout_dict = {**layout_dict, "simulation": {**layout_dict.get("simulation", {}), "strategy": self.strategy}}
+        return Layout(layout_dict)
 
     def load(self, name: str):
         layout = load_layout(layout_path(name))
         self.layout_name = name
-        self.sim = GridSimulation(layout)
+        self.watch = None
+        self.sim = GridSimulation(self._with_strategy(layout.to_dict()))
         self.running = False
         self.sent_events = 0
+
+    def load_benchmark(self, scenario: str, seed: int = 1):
+        """Replay one benchmark run live: same layout and orders as the benchmark."""
+        if scenario not in benchmark.SCENARIOS:
+            raise ValueError(f"Unknown benchmark scenario '{scenario}'")
+        layout_dict, tasks = benchmark.build_watch(scenario, self.strategy or "nexus", seed)
+        self.layout_name = f"benchmark-{scenario}"
+        self.watch = {"scenario": scenario, "seed": seed, "tasks": tasks, "done": False,
+                      "title": benchmark.SCENARIOS[scenario]["title"]}
+        self.sim = GridSimulation(Layout(layout_dict))
+        for pickup, dropoff in tasks:
+            self.sim.fleet.create(pickup, dropoff, "normal", now=0.0)
+        self.sim._event("system", f"Benchmark replay: {len(tasks) or len(self.sim.agents)} "
+                        f"{'orders' if tasks else 'robot trips'}, seed {seed}, "
+                        f"strategy {'NEXUS' if self.sim.strategy == 'nexus' else 'stop-and-wait'}")
+        self.running = False
+        self.sent_events = 0
+
+    def reload(self):
+        """Start the current layout (or benchmark replay) over."""
+        if self.watch:
+            self.load_benchmark(self.watch["scenario"], self.watch["seed"])
+        else:
+            self.sim.reset()
+            self.sent_events = 0
+
+    def check_watch_done(self):
+        """Announce when a benchmark replay has delivered every order."""
+        w = self.watch
+        if not w or w["done"] or not w["tasks"]:
+            return
+        if self.sim.fleet.counters["completed"] >= len(w["tasks"]):
+            w["done"] = True
+            self.running = False
+            self.sim._event("system", f"All {len(w['tasks'])} orders delivered in {self.sim.time:.1f} s "
+                            f"({'NEXUS' if self.sim.strategy == 'nexus' else 'stop-and-wait'})")
 
     def layout_message(self) -> Dict[str, Any]:
         layout = self.sim.layout
         return {
             "type": "layout",
             "name": self.layout_name,
+            "benchmark": None if not self.watch else {k: self.watch[k] for k in ("scenario", "seed", "title")},
             "layout": layout.to_dict(),
             "issues": layout.validate(),
         }
@@ -97,6 +149,7 @@ class Controller:
             "type": "state",
             "running": self.running,
             "speed": self.speed,
+            "strategy": self.sim.strategy,
             "state": self.sim.snapshot(),
             "events": events[-120:],
             "reset_events": include_all_events,
@@ -125,9 +178,8 @@ class Controller:
         cmd = command.get("cmd")
         async with self.lock:
             if cmd == "play":
-                if self.sim.status == "COMPLETED":
-                    self.sim.reset()
-                    self.sent_events = 0
+                if self.sim.status == "COMPLETED" or (self.watch and self.watch["done"]):
+                    self.reload()
                     await self.broadcast_state(include_all_events=True)
                 self.running = self.sim.status != "INVALID"
             elif cmd == "pause":
@@ -135,10 +187,29 @@ class Controller:
             elif cmd == "step":
                 self.running = False
                 self.sim.step()
+                self.check_watch_done()
             elif cmd == "reset":
                 self.running = False
-                self.sim.reset()
-                self.sent_events = 0
+                self.reload()
+                await self.broadcast_state(include_all_events=True)
+                return
+            elif cmd == "strategy":
+                value = str(command.get("value"))
+                if value not in STRATEGIES:
+                    raise ValueError(f"Unknown strategy '{value}'")
+                self.strategy = value
+                if self.watch:
+                    self.load_benchmark(self.watch["scenario"], self.watch["seed"])
+                else:
+                    self.load(self.layout_name)
+                await self.broadcast(self.layout_message())
+                await self.broadcast_state(include_all_events=True)
+                return
+            elif cmd == "benchmark.watch":
+                if command.get("strategy") in STRATEGIES:
+                    self.strategy = command["strategy"]
+                self.load_benchmark(str(command.get("scenario")), int(command.get("seed", 1)))
+                await self.broadcast(self.layout_message())
                 await self.broadcast_state(include_all_events=True)
                 return
             elif cmd == "speed":
@@ -187,7 +258,8 @@ class Controller:
                     self.sim.step()
                     backlog -= self.sim.time_step
                     steps += 1
-                    if self.sim.status in {"COMPLETED", "INVALID"}:
+                    self.check_watch_done()
+                    if not self.running or self.sim.status in {"COMPLETED", "INVALID"}:
                         self.running = False
                         backlog = 0.0
                         break
@@ -198,6 +270,51 @@ class Controller:
 
 
 controller = Controller()
+
+
+class BenchmarkJob:
+    """One benchmark run at a time, in a background thread (it uses its own
+    worker processes, so the live view keeps running)."""
+
+    def __init__(self):
+        self.running = False
+        self.done = 0
+        self.total = 0
+        self.mode = None
+        self.started = None
+        self.error: Optional[str] = None
+
+    def status(self) -> Dict[str, Any]:
+        return {"running": self.running, "done": self.done, "total": self.total, "mode": self.mode,
+                "elapsed": round(time.time() - self.started, 1) if self.started else None, "error": self.error}
+
+    def start(self, mode: str):
+        if self.running:
+            raise HTTPException(409, "A benchmark is already running")
+        quick = mode == "quick"
+        names = [n for n in benchmark.SCENARIOS if not (quick and benchmark.SCENARIOS[n].get("heavy"))]
+        self.running, self.done, self.total, self.mode, self.error = True, 0, 0, mode, None
+        self.started = time.time()
+
+        def progress(done, total):
+            self.done, self.total = done, total
+
+        def work():
+            try:
+                jobs = max(1, (os.cpu_count() or 2) - 1)
+                result = benchmark.run_suite(names, seeds=1 if quick else 3, jobs=jobs, progress=progress)
+                result["mode"] = mode
+                BENCHMARK_FILE.parent.mkdir(parents=True, exist_ok=True)
+                BENCHMARK_FILE.write_text(json.dumps(result, indent=2))
+            except Exception as error:  # surfaced on the Benchmark page
+                self.error = str(error)
+            finally:
+                self.running = False
+
+        threading.Thread(target=work, daemon=True).start()
+
+
+bench_job = BenchmarkJob()
 
 
 @asynccontextmanager
@@ -228,6 +345,31 @@ async def revalidate_frontend(request, call_next):
 # ----------------------------------------------------------------------
 # REST
 # ----------------------------------------------------------------------
+
+@app.get("/api/benchmark")
+def api_benchmark():
+    """Latest saved results, the scenario catalogue and the job status."""
+    result = None
+    if BENCHMARK_FILE.exists():
+        try:
+            result = json.loads(BENCHMARK_FILE.read_text(encoding="utf-8"))
+            if not result.get("generated_at"):  # files written by older versions
+                result["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(BENCHMARK_FILE.stat().st_mtime))
+        except (OSError, json.JSONDecodeError):
+            result = None
+    scenarios = [{"name": n, "title": s["title"], "heavy": bool(s.get("heavy")), "seeded": s["seeded"]}
+                 for n, s in benchmark.SCENARIOS.items()]
+    return {"result": result, "scenarios": scenarios, "job": bench_job.status()}
+
+
+@app.post("/api/benchmark/run")
+def api_benchmark_run(payload: Dict[str, Any]):
+    mode = payload.get("mode", "quick")
+    if mode not in ("quick", "full"):
+        raise HTTPException(400, "mode must be 'quick' or 'full'")
+    bench_job.start(mode)
+    return bench_job.status()
+
 
 @app.get("/api/layouts")
 def api_layouts():

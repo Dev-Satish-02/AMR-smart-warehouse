@@ -349,6 +349,7 @@ export class ReportsPage {
     const s = r.summary;
     const unit = s.mode === "missions" ? "missions" : "trips";
     $("#rp-meta").textContent = `${r.layout} · shift so far ${fmtDuration(r.shift_seconds)} (simulated) · ${s.robots} robots · generated ${new Date(r.generated_at).toLocaleTimeString()}`
+      + ` · coordination: ${s.strategy === "stop_and_wait" ? "stop & wait (classical baseline)" : "NEXUS"}`
       + (r.estop ? " · E-STOP ENGAGED" : "");
 
     const tile = (label, value, sub, unitText = "") =>
@@ -455,4 +456,202 @@ function barChart(timeline, unit) {
   return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${unit} delivered per ${minutes} minutes">
     <g class="grid">${grid}</g><line class="baseline" x1="${left}" x2="${width - right}" y1="${y(0)}" y2="${y(0)}"></line>
     <g class="axis">${yLabels}${xLabels}</g>${bars}</svg>`;
+}
+
+// ================================================================== benchmark
+
+const STRATEGY_LABEL = { stop_and_wait: "Stop & wait", nexus: "NEXUS" };
+
+export class BenchmarkPage {
+  constructor(ctx) {
+    this.ctx = ctx;
+    this.data = null;
+    this.timer = null;
+    $("#bm-run-quick").addEventListener("click", () => this.run("quick"));
+    $("#bm-run-full").addEventListener("click", () => this.run("full"));
+    $("#bm-body").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-watch]");
+      if (!button) return;
+      this.ctx.watchBenchmark(button.dataset.watch, button.dataset.strategy);
+    });
+  }
+
+  show() { this.refresh(); }
+  hide() { clearTimeout(this.timer); this.timer = null; }
+
+  async refresh() {
+    clearTimeout(this.timer);
+    try {
+      const res = await fetch("/api/benchmark");
+      if (res.ok) {
+        const wasRunning = this.data?.job?.running;
+        this.data = await res.json();
+        this.render();
+        if (wasRunning && !this.data.job.running && !this.data.job.error) this.ctx.toast("Benchmark finished: results updated");
+      }
+    } catch { /* retry below */ }
+    // Poll quickly while a run is in progress.
+    if (this.data?.job?.running) this.timer = setTimeout(() => this.refresh(), 1000);
+  }
+
+  async run(mode) {
+    const res = await fetch("/api/benchmark/run", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      this.ctx.toast(body.detail || "Could not start the benchmark");
+      return;
+    }
+    this.ctx.toast(mode === "quick" ? "Quick benchmark started" : "Full benchmark started");
+    if (this.data) this.data.job = { running: true };
+    this.refresh();
+  }
+
+  renderJob(job) {
+    const running = Boolean(job?.running);
+    $("#bm-progress").hidden = !running && !job?.error;
+    $("#bm-run-quick").disabled = running;
+    $("#bm-run-full").disabled = running;
+    if (running) {
+      const share = job.total ? job.done / job.total : 0;
+      $("#bm-progress-text").textContent = `Running ${job.mode} benchmark · ${job.done}/${job.total || "…"} runs · ${fmtDuration(job.elapsed)}`;
+      $("#bm-progress-bar").style.width = `${(share * 100).toFixed(1)}%`;
+    } else if (job?.error) {
+      $("#bm-progress-text").textContent = `Last run failed: ${job.error}`;
+      $("#bm-progress-bar").style.width = "0%";
+    }
+  }
+
+  render() {
+    const d = this.data;
+    if (!d) return;
+    this.renderJob(d.job);
+    const r = d.result;
+    if (!r) {
+      $("#bm-meta").textContent = "No results yet";
+      $("#bm-body").innerHTML = `<section class="card"><div class="empty-state">Run the benchmark to compare NEXUS with the classical stop-and-wait protocol on the same layouts and orders.</div></section>${methodHtml()}`;
+      return;
+    }
+    const o = r.summary.overall;
+    const rows = r.summary.scenarios;
+    const target = o.target ?? 0.2;
+    const counted = rows.filter((s) => s.stop_and_wait.all_completed && s.nexus.all_completed);
+    const meeting = counted.filter((s) => (s.reduction.completion_time ?? -1) >= target);
+    const stopsBase = rows.reduce((a, s) => a + (s.stop_and_wait.stops || 0), 0);
+    const stopsNexus = rows.reduce((a, s) => a + (s.nexus.stops || 0), 0);
+    const when = r.generated_at ? new Date(r.generated_at).toLocaleString() : "earlier run";
+    $("#bm-meta").textContent = `${rows.length} scenarios · ${r.seeds} seed${r.seeds === 1 ? "" : "s"} each · simulated, both strategies on identical layouts and orders · ${when} · computed in ${fmtDuration(r.wall_seconds)}`;
+
+    const pct = (v, digits = 1) => (v === null || v === undefined ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(digits)}%`);
+    const tile = (label, value, sub) => `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></div>`;
+    const kpis = [
+      tile("Total completion time", pct(o.total_completion_reduction), `NEXUS vs stop-and-wait, ${o.scenarios_counted} scenarios`),
+      tile(`Scenarios ≥ ${Math.round(target * 100)}% faster`, `${meeting.length}<small>/ ${counted.length}</small>`, meeting.length ? meeting.map((s) => shortTitle(s.title)).join(" · ") : "none yet"),
+      tile("Full stops in traffic", stopsBase ? `${fmtPct(Math.abs(1 - stopsNexus / stopsBase))}<small>${stopsNexus <= stopsBase ? "fewer" : "more"}</small>` : "—",
+        `${fmtNumber(stopsNexus, 0)} with NEXUS vs ${fmtNumber(stopsBase, 0)} (per-scenario means, summed)`),
+      tile("Collisions", fmtNumber(o.collisions), o.collisions === 0 ? "none with either strategy" : "robots closer than 0.7 m"),
+    ].join("");
+
+    const met = o.total_completion_reduction !== null && o.total_completion_reduction >= target;
+    const timeouts = o.timeouts.stop_and_wait + o.timeouts.nexus;
+    const verdict = `
+      <div class="bm-verdict ${met ? "met" : "short"}">
+        <svg><use href="#${met ? "s-arrived" : "s-waiting"}"/></svg>
+        <div>${met
+          ? `<b>Target met:</b> NEXUS finishes the same work ${pct(o.total_completion_reduction)} faster overall than stop-and-wait (target ${Math.round(target * 100)}%).`
+          : `<b>Target not met overall:</b> NEXUS finishes the same work ${pct(o.total_completion_reduction)} faster overall (target ${Math.round(target * 100)}%).`}
+          The gain is largest where paths overlap most; in light traffic both strategies are close, because there is little waiting to remove.
+          ${timeouts ? ` ${timeouts} run(s) timed out; scenarios with a timed-out run (${o.excluded_timeouts.map(escapeHtml).join(", ")}) are shown but not counted.` : ""}</div>
+      </div>`;
+
+    $("#bm-body").innerHTML = `
+      <section class="report-kpis">${kpis}</section>
+      ${verdict}
+      <section class="card">
+        <div class="card-head"><h2>Time to finish every order</h2>
+          <div class="chart-legend"><span><i style="background:${categoryColor("idle")}"></i>Stop &amp; wait</span><span><i style="background:${categoryColor("moving")}"></i>NEXUS</span></div>
+        </div>
+        <div class="chart bm-chart">${compareChart(rows, target)}</div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>Scenarios</h2><span class="card-hint">Watch replays the scenario live in Overview with the chosen strategy</span></div>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Scenario</th><th class="num">Stop &amp; wait</th><th class="num">NEXUS</th><th class="num">Reduction</th>
+            <th class="num">Full stops</th><th class="num">Waiting share</th><th class="num">Collisions</th><th>Watch live</th></tr></thead>
+          <tbody>${rows.map((s) => {
+            const b = s.stop_and_wait, n = s.nexus;
+            const counts = b.all_completed && n.all_completed;
+            return `<tr>
+              <td class="wrap"><b>${escapeHtml(s.title)}</b>${counts ? "" : `<div class="muted">timed out: not counted</div>`}</td>
+              <td class="num">${fmtDuration(b.completion_time)}</td>
+              <td class="num">${fmtDuration(n.completion_time)}</td>
+              <td class="num"><b>${pct(s.reduction.completion_time)}</b></td>
+              <td class="num">${fmtNumber(b.stops, 0)} → ${fmtNumber(n.stops, 0)}</td>
+              <td class="num">${fmtPct(b.waiting_share, 1)} → ${fmtPct(n.waiting_share, 1)}</td>
+              <td class="num">${b.collisions + n.collisions}</td>
+              <td><span class="bm-watch">
+                <button class="btn" data-watch="${s.scenario}" data-strategy="stop_and_wait">Stop &amp; wait</button>
+                <button class="btn" data-watch="${s.scenario}" data-strategy="nexus">NEXUS</button>
+              </span></td></tr>`;
+          }).join("")}</tbody>
+        </table></div>
+      </section>
+      ${methodHtml()}`;
+  }
+}
+
+function shortTitle(title) {
+  return escapeHtml(title.replace(/\s*\(.*\)$/, ""));
+}
+
+function methodHtml() {
+  return `
+    <section class="card">
+      <div class="card-head"><h2>How the comparison works</h2></div>
+      <div class="bm-method">
+        Both strategies run the same layout, robots and order list (same random seed). Only the coordination differs; the safety layer (cell reservations, deadlock back-off) is shared, so both must reach zero collisions.
+        <ul>
+          <li><b>Stop &amp; wait (classical):</b> fixed priority by robot ID. The lower-priority robot drives up to the shared stretch of path, stops, and waits until the other robot has cleared all of it. No rerouting, no speed adaptation.</li>
+          <li><b>NEXUS:</b> peer-to-peer negotiation (first to arrive goes first). The robot that gives way slows down to cross just behind the other instead of stopping, changes lanes when that is quicker than waiting, and never accepts an order that would close a wait loop.</li>
+          <li><b>Metric:</b> total task completion time, i.e. when the last order is delivered. Reduction = 1 − NEXUS / stop-and-wait. Scenarios with a timed-out run are not counted.</li>
+        </ul>
+      </div>
+    </section>`;
+}
+
+// Grouped horizontal bars: stop-and-wait vs NEXUS per scenario, reduction on the right.
+function compareChart(rows, target) {
+  const width = 1200, rowH = 46, barH = 15, left = 300, right = 190, top = 8, bottom = 24;
+  const height = top + rows.length * rowH + bottom;
+  const innerW = width - left - right;
+  const values = rows.flatMap((s) => [s.stop_and_wait.completion_time || 0, s.nexus.completion_time || 0]);
+  const { max, ticks } = niceScale(Math.max(...values, 1), 4);
+  const x = (v) => left + (v / max) * innerW;
+  const base = categoryColor("idle"), ours = categoryColor("moving");
+  const grid = ticks.map((t) => `<line x1="${x(t)}" x2="${x(t)}" y1="${top}" y2="${height - bottom}"/>`).join("");
+  const axis = ticks.map((t) => `<text x="${x(t)}" y="${height - 6}" text-anchor="middle">${fmtNumber(t)} s</text>`).join("");
+  const bar = (y, v, color, label) => {
+    const w = Math.max(0, x(v || 0) - left);
+    const r = Math.min(3, barH / 2, w);
+    // Square at the baseline, rounded at the data end.
+    const path = `M${left},${y} h${Math.max(0, w - r)} a${r},${r} 0 0 1 ${r},${r} v${barH - 2 * r} a${r},${r} 0 0 1 ${-r},${r} h${-Math.max(0, w - r)} z`;
+    return `<path d="${path}" fill="${color}" data-tip="<b>${label}</b>${fmtDuration(v)}"/>
+      <text class="bm-value" x="${left + w + 4}" y="${y + barH - 3}">${fmtDuration(v)}</text>`;
+  };
+  const body = rows.map((s, i) => {
+    const y0 = top + i * rowH + 6;
+    const red = s.reduction.completion_time;
+    const counted = s.stop_and_wait.all_completed && s.nexus.all_completed;
+    const redText = red === null ? "—" : `${red >= 0 ? "+" : "−"}${Math.abs(red * 100).toFixed(1)}%`;
+    const redColor = !counted ? "var(--muted)" : red >= target ? "var(--good)" : "var(--text)";
+    return `
+      <text class="bm-label" x="${left - 10}" y="${y0 + barH + 2}" text-anchor="end">${shortTitle(s.title)}</text>
+      ${bar(y0, s.stop_and_wait.completion_time, base, `${escapeHtml(s.title)} · stop &amp; wait`)}
+      ${bar(y0 + barH + 2, s.nexus.completion_time, ours, `${escapeHtml(s.title)} · NEXUS`)}
+      <text class="bm-red" x="${width - 4}" y="${y0 + barH + 2}" text-anchor="end" fill="${redColor}">${counted ? redText : "n/c"}</text>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Completion time per scenario">
+    <g class="grid">${grid}</g><g class="axis">${axis}</g>
+    <line class="baseline" x1="${left}" x2="${left}" y1="${top}" y2="${height - bottom}"/>${body}</svg>`;
 }

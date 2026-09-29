@@ -27,7 +27,7 @@ import json
 import os
 import random
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -327,7 +327,18 @@ def summarise(runs: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def run_suite(names: List[str], seeds: int = 3, jobs: Optional[int] = None) -> Dict[str, Any]:
+def build_watch(scenario: str, strategy: str, seed: int = 1) -> Tuple[Dict[str, Any], List[Tuple[str, str]]]:
+    """Layout dict (with the strategy set) and task list of one benchmark run,
+    for replaying it in the live view."""
+    layout_dict, tasks = SCENARIOS[scenario]["build"](seed)
+    layout_dict = dict(layout_dict)
+    layout_dict["simulation"] = {**layout_dict.get("simulation", {}), "strategy": strategy}
+    return layout_dict, tasks
+
+
+def run_suite(names: List[str], seeds: int = 3, jobs: Optional[int] = None,
+              progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, Any]:
+    """Run every scenario x seed x strategy; progress(done, total) after each run."""
     work = []
     for name in names:
         seed_list = list(range(1, seeds + 1)) if SCENARIOS[name]["seeded"] else [1]
@@ -336,12 +347,20 @@ def run_suite(names: List[str], seeds: int = 3, jobs: Optional[int] = None) -> D
                 work.append((name, strategy, seed))
     started = time.perf_counter()
     jobs = jobs or min(len(work), os.cpu_count() or 2)
+    tick = progress or (lambda done, total: None)
     if jobs <= 1:
-        runs = [run_one(*w) for w in work]
+        runs = []
+        for w in work:
+            runs.append(run_one(*w))
+            tick(len(runs), len(work))
     else:
         with ProcessPoolExecutor(max_workers=jobs) as pool:
-            runs = list(pool.map(run_one, *zip(*work)))
-    return {"runs": runs, "summary": summarise(runs), "seeds": seeds,
+            futures = [pool.submit(run_one, *w) for w in work]
+            for done, _ in enumerate(as_completed(futures), start=1):
+                tick(done, len(work))
+            runs = [f.result() for f in futures]
+    return {"runs": runs, "summary": summarise(runs), "seeds": seeds, "scenarios": names,
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "wall_seconds": round(time.perf_counter() - started, 1)}
 
 

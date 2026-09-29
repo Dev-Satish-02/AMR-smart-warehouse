@@ -105,6 +105,7 @@
         <button class="tab" data-mode="fleet" role="tab" aria-selected="false">Fleet</button>
         <button class="tab" data-mode="alerts" role="tab" aria-selected="false">Alerts<span class="badge" id="alert-badge" hidden></span></button>
         <button class="tab" data-mode="reports" role="tab" aria-selected="false">Reports</button>
+        <button class="tab" data-mode="benchmark" role="tab" aria-selected="false">Benchmark</button>
         <button class="tab" data-mode="editor" role="tab" aria-selected="false">Layout Editor</button>
       </nav>
 
@@ -137,7 +138,16 @@
             <h1 id="layout-title">—</h1>
             <div class="stage-meta" id="layout-meta"></div>
           </div>
-          <div class="sim-status" id="sim-status"></div>
+          <div class="stage-head-right">
+            <div class="strategy" title="Coordination strategy. Switching restarts the current layout.">
+              <span class="select-label">Coordination</span>
+              <div class="seg" id="strategy" role="radiogroup" aria-label="Coordination strategy">
+                <button data-value="nexus" class="active">NEXUS</button>
+                <button data-value="stop_and_wait">Stop &amp; wait</button>
+              </div>
+            </div>
+            <div class="sim-status" id="sim-status"></div>
+          </div>
         </div>
 
         <div class="issues" id="issues" hidden></div>
@@ -391,6 +401,25 @@
           <div class="card-head"><h2>History</h2><span class="card-hint">resolved alerts, newest first</span></div>
           <div class="table-wrap" id="al-history"></div>
         </section>
+      </section>
+
+      <!-- ============================================================ BENCHMARK -->
+      <section class="page" data-view="benchmark" hidden>
+        <div class="page-head">
+          <div>
+            <h1>Benchmark: NEXUS vs stop-and-wait</h1>
+            <div class="stage-meta" id="bm-meta"></div>
+          </div>
+          <div class="page-actions">
+            <div class="bm-progress" id="bm-progress" hidden>
+              <span id="bm-progress-text"></span>
+              <div class="progress"><span id="bm-progress-bar"></span></div>
+            </div>
+            <button class="btn" id="bm-run-quick" title="Every scenario except the heavy ones, 1 seed (about a minute)">Run quick</button>
+            <button class="btn primary" id="bm-run-full" title="Every scenario, 3 seeds (a few minutes)">Run full benchmark</button>
+          </div>
+        </div>
+        <div id="bm-body"></div>
       </section>
 
       <!-- ============================================================ REPORTS -->
