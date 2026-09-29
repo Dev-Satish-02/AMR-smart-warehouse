@@ -8,13 +8,20 @@ Runs the existing NEXUS stack on a painted lane layout:
     NEXUSPlanner        A*, here over a LaneGrid            (algorithms/planner.py, lane_grid.py)
     ConflictDetector    predictive trajectory conflicts     (algorithms/conflict_detector.py)
     NegotiationManager  ETA-based priority                  (algorithms/negotiation.py)
-    RobotAgent.replan_around  dynamic rerouting
 
 plus grid-specific coordination:
 
     CellReservationTable  robots reserve cells before entering them
-    deadlock resolution   wait-for cycles -> negotiation loser backs off to a side cell
+    flow-through crossing the give-way robot is kept off the winner's cells
+                          and slows to arrive just after it clears (no stop);
+                          the order never closes a wait loop
+    cost-aware rerouting  change lanes / go around only if quicker than waiting
+    deadlock resolution   wait-for cycles -> a robot in the loop backs off to a side cell
     via-point routes      per-robot custom paths honoured through every replan
+
+simulation.strategy = "stop_and_wait" swaps the NEXUS negotiation for the
+classical baseline (fixed priority, stop at the shared stretch, no rerouting);
+everything else is shared.
 
 and a kinematic GridWorld instead of IR-SIM physics.
 """
@@ -54,6 +61,11 @@ TIME_CATEGORIES = ("moving", "handling", "waiting", "charging", "idle", "held", 
 AT_CENTER = 1e-3          # metres from a cell centre that count as "on" it (motion lands exactly)
 PARK_REROUTE_AFTER = 2.0  # s blocked by a parked/idle robot before rerouting
 YIELD_TIMEOUT = 25.0      # s a backed-off robot waits before retrying anyway
+BAY_STUCK_AFTER = 4.0     # s a robot driving to its back-off bay may be blocked before it counts in deadlocks
+FLOW_WINDOW = 12          # cells of a give-way robot's path checked against the other's path
+FLOW_MIN_SPEED = 0.2      # m/s: a give-way robot slows to no less than this while it can still roll
+FLOW_MARGIN = 0.4         # s arrival margin after the other robot has cleared the crossing
+FLOW_TIMEOUT = 30.0       # s before a crossing order is dropped (the deadlock layer takes over)
 
 
 class RoutePlanner:
@@ -402,6 +414,8 @@ class GridSimulation:
             for agent, route in zip(self.agents, routes)
         ]
         speeds, caps = self._zone_limits(routes)
+        if self.strategy == "nexus":
+            speeds = self._flow_speeds(speeds)
         reached = self.world.step(routes, speeds, caps)
         for agent, count in zip(self.agents, reached):
             agent.update(self.world.time)
@@ -501,26 +515,18 @@ class GridSimulation:
         if self.strategy == "stop_and_wait":
             self._release_stop_and_wait(now)
             return
+        # Flow-through: the crossing order ends the moment the winner's body
+        # and remaining path no longer touch the give-way robot's next cells.
         for pair, info in list(self.active_conflicts.items()):
             winner, loser = info["winner"], info["loser"]
-            point = info["position"]
-            cs = self.layout.cell_size
-            far = np.linalg.norm(winner.state.position - point) >= 1.5 * cs
-            # The conflict is detected seconds ahead, so the winner starts out
-            # "far" from it: only release once the point is behind the winner.
-            ahead = any(
-                np.linalg.norm(p - point) < 0.9 * cs
-                for p in winner.planned_path[winner.waypoint_index:]
-            )
             gone = winner.intent == "ARRIVED" or not self._remaining_cells(winner)
-            if (far and not ahead and not winner.stopped) or gone or now - info["since"] > 20.0:
-                self._event("resume", f"{winner.robot_id} cleared -> {loser.robot_id} resumes", loser.robot_id)
+            if self._first_gate(loser, winner) is None or gone or now - info["since"] > FLOW_TIMEOUT:
+                self._event("resume", f"{winner.robot_id} cleared -> {loser.robot_id} crosses", loser.robot_id)
                 self._drop_conflict(pair)
 
-        # Safety net: a negotiation stop must always belong to a live conflict.
-        losers = {info["loser"].robot_id for info in self.active_conflicts.values()}
+        # Safety net: NEXUS never parks a robot with stop(); nothing stays stopped.
         for agent in self.agents:
-            if agent.stopped and agent.robot_id not in losers and agent.robot_id not in self.yielding:
+            if agent.stopped and agent.robot_id not in self.yielding:
                 agent.resume()
 
     def _drop_conflict(self, pair):
@@ -544,36 +550,248 @@ class GridSimulation:
             if not self._needs_negotiation(a, b):
                 continue
 
-            self.counters["conflicts_predicted"] += 1
-            self.counters["negotiations"] += 1
             win_d, lose_d = self.negotiation.negotiate(a, b, conflict)
             winner, loser = self._agent(win_d.robot_id), self._agent(lose_d.robot_id)
+            reason = win_d.reason
+            # A robot already standing on the other's path has to clear it
+            # first, whatever the ETAs say.
+            if set(self._occupied(loser)) & set(self._remaining_cells(winner)) \
+                    and not set(self._occupied(winner)) & set(self._remaining_cells(loser)):
+                winner, loser = loser, winner
+                reason = f"{winner.robot_id} is already on {loser.robot_id}'s path"
+            ordered = self._acyclic_order(winner, loser)
+            if ordered[0] is None:
+                continue
+            if ordered[0] is not winner:
+                reason = f"{loser.robot_id} giving way would close a wait loop"
+            winner, loser = ordered
+            gate = self._first_gate(loser, winner)
+            if gate is None:
+                continue  # the paths do not actually share a cell nearby
 
-            loser.stop(reason=f"WAIT_FOR_{winner.robot_id}")
+            # Cost-aware: change lanes when the detour is quicker than waiting
+            # for the winner to clear (head-on on a two-way stretch, a long
+            # shared stretch); a plain crossing is cheaper to flow through.
+            wait = self._expected_wait(loser, winner, gate)
+            avoid = set(self._remaining_cells(winner)[: 2 * FLOW_WINDOW]) | set(self._occupied(winner))
+            if self._detour(loser, avoid, wait, now, f"changes lane to pass {winner.robot_id}"):
+                self.counters["conflicts_predicted"] += 1
+                self.counters["negotiations"] += 1
+                continue
 
-            action = "PROCEED"
-            loser_cells = set(self._occupied(loser))
-            if loser_cells & set(self._remaining_cells(winner)):
-                if winner.replan_around(loser.state.position, obstacle_radius=0.6 * self.layout.cell_size):
-                    winner.advance_waypoint()
-                    self.counters["reroutes"] += 1
-                    self.meta[winner.robot_id]["reroute_flash"] = now + 1.5
-                    action = "REROUTE"
-
+            self.counters["conflicts_predicted"] += 1
+            self.counters["negotiations"] += 1
             self.active_conflicts[pair] = {
                 "winner": winner,
                 "loser": loser,
                 "position": np.asarray(conflict.conflict_position, dtype=float).copy(),
+                "gate": gate[1],
                 "since": now,
             }
             self._event(
                 "conflict",
                 f"Conflict {a.robot_id}↔{b.robot_id} in {conflict.time_to_conflict:.1f}s: "
-                f"{winner.robot_id} {action.lower()}s, {loser.robot_id} yields ({win_d.reason})",
+                f"{winner.robot_id} crosses first, {loser.robot_id} slows to cross behind it ({reason})",
                 winner.robot_id,
                 position=[float(v) for v in conflict.conflict_position],
                 pair=[a.robot_id, b.robot_id],
             )
+
+    # ------------------------------------------------------------------
+    # Flow-through crossing (NEXUS)
+    # ------------------------------------------------------------------
+
+    def _first_gate(self, loser: RobotAgent, winner: RobotAgent) -> Optional[Tuple[int, Cell]]:
+        """(path index, cell) of the first cell in the give-way robot's next
+        FLOW_WINDOW cells that the winner still occupies or has to drive
+        through; None once the way is clear."""
+        blocked = set(self._remaining_cells(winner)) | set(self._occupied(winner))
+        body = set(self._occupied(loser))
+        for j, cell in self._upcoming(loser)[:FLOW_WINDOW]:
+            if cell in body:
+                continue
+            if cell in blocked:
+                return j, cell
+        return None
+
+    def _waits_for_graph(self) -> Dict[str, set]:
+        """Who waits (or will wait) for whom: crossing orders, current
+        reservation blocks, and robots queued behind another on its path."""
+        graph: Dict[str, set] = {a.robot_id: set() for a in self.agents}
+        for info in self.active_conflicts.values():
+            graph[info["loser"].robot_id].add(info["winner"].robot_id)
+        for agent in self.agents:
+            blocker = self.meta[agent.robot_id]["blocked_by"]
+            if blocker:
+                graph[agent.robot_id].add(blocker)
+        # Queued behind: a robot standing, or driving the same way, on the path ahead
+        # (one driving towards it is the encounter being negotiated, not a queue).
+        for agent in self.agents:
+            ahead = set(self._remaining_cells(agent)[:FLOW_WINDOW])
+            for other in self.agents:
+                if other is agent or not set(self._occupied(other)) & ahead:
+                    continue
+                if other.robot.speed < 1e-3 or float(np.cos(other.robot.heading - agent.robot.heading)) > 0.7:
+                    graph[agent.robot_id].add(other.robot_id)
+        return graph
+
+    def _acyclic_order(self, winner: RobotAgent, loser: RobotAgent):
+        """(winner, loser), flipped if loser -> winner would close a wait
+        loop; (None, None) if both orders would."""
+        graph = self._waits_for_graph()
+
+        def reaches(src: str, dst: str) -> bool:
+            seen, stack = {src}, [src]
+            while stack:
+                node = stack.pop()
+                if node == dst:
+                    return True
+                for nxt in graph.get(node, ()):
+                    if nxt not in seen:
+                        seen.add(nxt)
+                        stack.append(nxt)
+            return False
+
+        if not reaches(winner.robot_id, loser.robot_id):
+            return winner, loser
+        if not reaches(loser.robot_id, winner.robot_id):
+            return loser, winner
+        return None, None
+
+    def _blocker_wait(self, blocker: RobotAgent, now: float) -> float:
+        """Rough seconds until a stationary blocker is out of the way."""
+        meta = self.meta[blocker.robot_id]
+        if meta["hold"]:
+            return 60.0
+        if meta.get("busy_until") is not None and meta["activity"] in ("LOADING", "UNLOADING"):
+            return max(0.0, meta["busy_until"] - now) + 3.0
+        if meta["dwell_until"] is not None:
+            return max(0.0, meta["dwell_until"] - now) + 3.0
+        if self._parked(blocker):
+            return 4.0  # it will be asked to make way
+        return 6.0
+
+    def _expected_wait(self, loser: RobotAgent, winner: RobotAgent, gate: Tuple[int, Cell]) -> float:
+        """Seconds the give-way robot would lose waiting at the gate."""
+        seconds = self._clear_time(winner, gate[1])
+        if seconds is None:
+            return 8.0  # the winner is itself blocked or parks there: unknown, assume long
+        reach = max(0.0, self._distance_to(loser, gate[0]) - self.layout.cell_size) / max(loser.max_speed, 1e-6)
+        return max(0.0, seconds - reach)
+
+    def _path_time(self, start: np.ndarray, points: List[np.ndarray], speed: float) -> float:
+        """Driving time along points: distance at speed plus quarter turns."""
+        seconds, previous, heading = 0.0, start, None
+        for point in points:
+            d = point - previous
+            length = float(np.linalg.norm(d))
+            if length < 1e-9:
+                continue
+            h = float(np.arctan2(d[1], d[0]))
+            if heading is not None:
+                seconds += abs((h - heading + np.pi) % (2 * np.pi) - np.pi) / self.world.angular_speed
+            seconds += length / max(speed, 1e-6)
+            heading, previous = h, point
+        return seconds
+
+    def _detour(self, agent: RobotAgent, avoid, wait: float, now: float, what: str) -> bool:
+        """Replan around avoid (cells) and take the new path only if it is
+        quicker than the current one plus the expected wait."""
+        if self.strategy != "nexus" or agent.state.goal is None or wait < 1.0:
+            return False
+        keep = set(self._occupied(agent)) | {self.meta[agent.robot_id]["goal_cell"]}
+        obstacles = [(np.array(self.layout.cell_center(c)), 0.5 * self.layout.cell_size) for c in avoid if c not in keep]
+        if not obstacles:
+            return False
+        path = agent.planner.plan(agent.state.position, agent.state.goal, dynamic_obstacles=obstacles)
+        if not path:
+            return False
+        current = self._path_time(agent.state.position, agent.planned_path[agent.waypoint_index:], agent.max_speed)
+        detour = self._path_time(agent.state.position, path, agent.max_speed)
+        if detour + 0.5 >= current + wait:
+            return False
+        agent.set_path(path)
+        agent.advance_waypoint()
+        agent.intent = "REROUTING"
+        self.counters["reroutes"] += 1
+        self.meta[agent.robot_id]["reroute_flash"] = now + 1.5
+        self._event("reroute", f"{agent.robot_id} {what} (+{max(0.0, detour - current):.1f}s detour vs {wait:.1f}s wait)",
+                    agent.robot_id)
+        return True
+
+    def _gates(self) -> Dict[str, Dict[Cell, str]]:
+        """Per give-way robot: cells it may not reserve yet -> the robot it gives way to."""
+        gates: Dict[str, Dict[Cell, str]] = {}
+        for info in self.active_conflicts.values():
+            winner, loser = info["winner"], info["loser"]
+            cells = gates.setdefault(loser.robot_id, {})
+            still = set(self._remaining_cells(winner)) | set(self._occupied(winner))
+            if self.strategy == "stop_and_wait":
+                # The whole shared stretch stays closed until all of it is clear.
+                blocked = info["shared"] if info["shared"] & still else set()
+            else:
+                # Flow-through: only the cells the winner still has to pass.
+                blocked = still
+            for cell in blocked:
+                cells.setdefault(cell, winner.robot_id)
+        return gates
+
+    def _distance_to(self, agent: RobotAgent, index: int) -> float:
+        """Distance along the agent's path from its position to path point index."""
+        total, previous = 0.0, agent.state.position
+        for j in range(agent.waypoint_index, min(index, len(agent.planned_path) - 1) + 1):
+            total += float(np.linalg.norm(agent.planned_path[j] - previous))
+            previous = agent.planned_path[j]
+        return total
+
+    def _clear_time(self, winner: RobotAgent, cell: Cell) -> Optional[float]:
+        """Seconds until the winner's body has left cell (None: unknown, e.g.
+        it is blocked itself or parks there)."""
+        meta = self.meta[winner.robot_id]
+        if meta["blocked_by"] is not None or winner.stopped or winner.robot_id in self.yielding:
+            return None
+        upcoming = self._upcoming(winner)
+        hit = next((k for k, (_, c) in enumerate(upcoming) if c == cell), None)
+        if hit is None:
+            return 0.0 if cell not in self._occupied(winner) else None
+        if hit + 1 >= len(upcoming):
+            return None  # it stops in that cell
+        exit_index = upcoming[hit + 1][0]  # its centre on the next cell: body clear
+        distance = self._distance_to(winner, exit_index)
+        vmax = max(winner.max_speed, 1e-6)
+        seconds = distance / vmax + max(0.0, vmax - winner.robot.speed) / (2.0 * self.world.acceleration)
+        # Turns on the way (rotate in place).
+        points = [winner.state.position] + [winner.planned_path[j] for j, _ in upcoming[: hit + 2]]
+        headings = [np.arctan2(*(b - a)[::-1]) for a, b in zip(points, points[1:]) if np.linalg.norm(b - a) > 1e-9]
+        for h0, h1 in zip(headings, headings[1:]):
+            seconds += abs((h1 - h0 + np.pi) % (2 * np.pi) - np.pi) / self.world.angular_speed
+        return seconds
+
+    def _flow_speeds(self, speeds: List[float]) -> List[float]:
+        """Give-way robots slow down so they reach the crossing just as the
+        other robot has cleared it, instead of braking to a stop there."""
+        cs = self.layout.cell_size
+        out = list(speeds)
+        for info in self.active_conflicts.values():
+            loser, winner = info["loser"], info["winner"]
+            i = self.meta[loser.robot_id]["index"]
+            gate = self._first_gate(loser, winner)
+            if gate is None:
+                continue
+            seconds = self._clear_time(winner, gate[1])
+            if seconds is None:
+                continue  # unknown: drive up to the gate and wait there
+            # Its body touches the gate cell one cell before the gate's centre.
+            distance = self._distance_to(loser, gate[0]) - cs
+            if distance <= 0:
+                continue
+            target = distance / (seconds + FLOW_MARGIN)
+            if target >= out[i]:
+                continue
+            # Brake at most at the normal deceleration.
+            floor = loser.robot.speed - self.world.acceleration * self.time_step
+            out[i] = min(out[i], max(target, FLOW_MIN_SPEED, floor))
+        return out
 
     # ------------------------------------------------------------------
     # Classical stop-and-wait (benchmark baseline)
@@ -581,8 +799,9 @@ class GridSimulation:
 
     def _negotiate_stop_and_wait(self, conflicts: List[PredictedConflict], now: float):
         """Traditional traffic rule for overlapping paths: fixed priority by
-        robot ID; the lower-priority robot stops and waits until the other has
-        passed every cell their remaining paths share. No rerouting."""
+        robot ID; the lower-priority robot drives up to the shared stretch,
+        stops at its entry and waits until the other has passed every cell
+        their remaining paths share. No rerouting, no speed adaptation."""
         for conflict in conflicts:
             pair = tuple(sorted([conflict.robot_a, conflict.robot_b]))
             if pair in self.active_conflicts:
@@ -596,14 +815,13 @@ class GridSimulation:
                 continue
             winner, loser = (a, b) if a.robot_id < b.robot_id else (b, a)
             shared = set(self._remaining_cells(winner)) & (set(self._remaining_cells(loser)) | set(self._occupied(loser)))
-            loser.stop(reason=f"WAIT_FOR_{winner.robot_id}")
             self.counters["conflicts_predicted"] += 1
             self.counters["negotiations"] += 1
             self.active_conflicts[pair] = {
                 "winner": winner, "loser": loser, "since": now, "shared": shared,
                 "position": np.asarray(conflict.conflict_position, dtype=float).copy(),
             }
-            self._event("conflict", f"Conflict {a.robot_id}↔{b.robot_id}: {loser.robot_id} stops and waits for "
+            self._event("conflict", f"Conflict {a.robot_id}↔{b.robot_id}: {loser.robot_id} stops at the shared path and waits for "
                         f"{winner.robot_id} to clear {len(shared)} shared cell(s) (fixed priority)",
                         winner.robot_id, position=[float(v) for v in conflict.conflict_position],
                         pair=[a.robot_id, b.robot_id])
@@ -657,6 +875,7 @@ class GridSimulation:
             for cell in occupied[agent.robot_id]:
                 self.reservations.reserve(agent.robot_id, cell)
 
+        gates = self._gates()
         order = sorted(range(len(self.agents)), key=lambda i: self._priority(self.agents[i]))
         for i in order:
             agent = self.agents[i]
@@ -665,6 +884,7 @@ class GridSimulation:
             body = set(occupied[agent.robot_id])
             chain: List[int] = []
             blocked_by = None
+            gated = gates.get(agent.robot_id, {})
 
             for j, cell in upcoming:
                 if cell in body:
@@ -673,6 +893,10 @@ class GridSimulation:
                 if agent.stopped or meta["dwell_until"] is not None:
                     break
                 if len(chain) >= self.lookahead:
+                    break
+                if cell in gated:
+                    # Crossing order: wait for the winner to clear this cell.
+                    blocked_by = gated[cell]
                     break
                 if not self.reservations.reserve(agent.robot_id, cell):
                     blocked_by = self.reservations.holder(cell)
@@ -714,8 +938,10 @@ class GridSimulation:
     # ------------------------------------------------------------------
 
     def _resolve_blocks(self, wait_for: Dict[str, str], now: float):
-        # Only real blocking edges (robot has somewhere to go and is stuck).
-        blocking = {r: s for r, s in wait_for.items() if r not in self.yielding}
+        # Only real blocking edges (robot has somewhere to go and is stuck). A
+        # robot still driving to its back-off bay counts: its bay can be
+        # taken, and the cycle must be broken again.
+        blocking = {r: s for r, s in wait_for.items() if r not in self.yielding or self._to_bay(r, now)}
         cycle = self.reservations.find_cycle(blocking)
         if cycle:
             self._break_cycle(cycle, now)
@@ -735,18 +961,22 @@ class GridSimulation:
                     or self.meta[blocker_id]["blocked_since"] is not None):
                 continue
 
-            # The classical baseline never reroutes: it waits (or the parked
+            # NEXUS reroutes when the detour beats the expected wait; the
+            # classical baseline never reroutes (it waits, or the parked
             # blocker makes way).
-            if self.strategy == "nexus" and agent.replan_around(blocker.state.position, obstacle_radius=0.6 * self.layout.cell_size):
-                agent.advance_waypoint()
-                self.counters["reroutes"] += 1
-                meta["reroute_flash"] = now + 1.5
+            if self._detour(agent, set(self._occupied(blocker)), self._blocker_wait(blocker, now), now,
+                            f"reroutes around {blocker_id}"):
                 meta["blocked_since"] = now
-                self._event("reroute", f"{robot_id} reroutes around {blocker_id}", robot_id)
             elif self._parked(blocker) and self._back_off(blocker, agent, now):
                 self._event("backoff", f"{blocker_id} makes way for {robot_id}", blocker_id)
             else:
                 meta["blocked_since"] = now  # try again later
+
+    def _to_bay(self, robot_id: str, now: float) -> bool:
+        """Backing off, but stuck on the way to its bay for a while."""
+        agent = self._agent(robot_id)
+        since = self.meta[robot_id]["blocked_since"]
+        return agent.waypoint_index < len(agent.planned_path) and since is not None and now - since >= BAY_STUCK_AFTER
 
     def _break_cycle(self, cycle: List[str], now: float):
         a = self._agent(cycle[0])
@@ -766,7 +996,15 @@ class GridSimulation:
             winner, loser = self._agent(win_d.robot_id), self._agent(lose_d.robot_id)
             self.counters["negotiations"] += 1
 
-        for yielder, other in ((loser, winner), (winner, loser)):
+        candidates = [(loser, winner), (winner, loser)]
+        # Nobody in the pair can move aside: any robot in the loop may make
+        # way for the robot it waits for.
+        for k, robot_id in enumerate(cycle):
+            member, ahead = self._agent(robot_id), self._agent(cycle[(k + 1) % len(cycle)])
+            if member is not None and ahead is not None and member is not ahead \
+                    and (member, ahead) not in candidates:
+                candidates.append((member, ahead))
+        for yielder, other in candidates:
             if self._back_off(yielder, other, now):
                 self.stuck_since.pop(pair, None)
                 self._drop_conflict(pair)
@@ -791,6 +1029,18 @@ class GridSimulation:
             return False  # an operator hold is never overridden
         start = self._cell(yielder.state.position)
         avoid = set(self._remaining_cells(winner)) | set(self._occupied(winner))
+        bodies = {c for a in self.agents if a is not yielder for c in self._occupied(a)}
+
+        def free(cell) -> bool:
+            # Robot bodies never; a cell only reserved ahead by a robot that
+            # is itself standing still can be taken (it is re-reserved later).
+            holder = self.reservations.holder(cell)
+            if cell in bodies:
+                return False
+            if holder in (None, yielder.robot_id):
+                return True
+            other = self._agent(holder)
+            return other is not None and other.robot.speed < 1e-3 and self.meta[holder]["blocked_by"] is not None
         parents: Dict[Cell, Optional[Cell]] = {start: None}
         queue = deque([(start, 0)])
         target = None
@@ -805,7 +1055,7 @@ class GridSimulation:
                 n = (cell[0] + dx, cell[1] + dy)
                 if n in parents or not self.layout.move_allowed(cell, n):
                     continue
-                if self.reservations.holder(n) not in (None, yielder.robot_id):
+                if not free(n):
                     continue
                 # A free station is a fine bay, but never driven through.
                 if self.layout.is_station(n) and n in avoid:
@@ -820,6 +1070,11 @@ class GridSimulation:
         while parents[cells[-1]] is not None:
             cells.append(parents[cells[-1]])
         cells.reverse()
+        for cell in cells:
+            holder = self.reservations.holder(cell)
+            if holder not in (None, yielder.robot_id):
+                self.reservations.retain_only(holder, set(self.reservations.held_by(holder)) - {cell})
+            self.reservations.reserve(yielder.robot_id, cell)
         path = [np.array(self.layout.cell_center(c)) for c in cells]
         if yielder.stopped:
             yielder.resume()
@@ -828,6 +1083,7 @@ class GridSimulation:
         yielder.intent = "REROUTING"
         self.yielding[yielder.robot_id] = {"winner": winner.robot_id, "bay": target, "since": now}
         self.meta[yielder.robot_id]["dwell_until"] = None
+        self.meta[yielder.robot_id]["blocked_since"] = now  # grace before it can count as stuck again
         self.counters["backoffs"] += 1
         return True
 

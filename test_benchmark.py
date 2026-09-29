@@ -83,15 +83,65 @@ def main():
     failures += check(m["reroutes"] == 0, "baseline never reroutes")
     failures += check(sim.status == "COMPLETED" and m["safety_violations"] == 0, f"baseline finishes safely (t={m['time']} s)")
 
-    # ---------------------------------------------------------- full-stop metric
-    for strategy in ("stop_and_wait", "nexus"):
-        sim = GridSimulation(Layout(with_strategy(crossing(0), strategy)))
-        sim.run(max_steps=600)
-        failures += check(sim.counters["stops"] >= 1 and sim.meta["B"]["stops"] >= 1 and sim.meta["A"]["stops"] == 0,
-                          f"{strategy}: a robot braking to a standstill at the crossing counts as a full stop")
+    # ---------------------------------------------------------- crossing: stop vs flow through
+    def drive(strategy, delay=0):
+        sim = GridSimulation(Layout(with_strategy(crossing(delay), strategy)))
+        cy = 10 + delay
+        standstill, slowest, order = [], {"A": 9.0, "B": 9.0}, []
+        for _ in range(800):
+            sim.step()
+            for agent in sim.agents:
+                if sim.time > 2.0 and agent.intent != "ARRIVED":
+                    slowest[agent.robot_id] = min(slowest[agent.robot_id], agent.robot.speed)
+                if (10, cy) in sim._occupied(agent) and agent.robot_id not in order:
+                    order.append(agent.robot_id)
+            b = sim._agent("B")
+            if sim.meta["B"]["status"] == "WAITING" and b.robot.speed < 1e-3:
+                standstill.append(sim._cell(b.state.position))
+            if sim.status != "RUNNING":
+                break
+        return sim, standstill, slowest, order
+
+    sim, standstill, _, _ = drive("stop_and_wait")
+    failures += check(sim.meta["B"]["stops"] >= 1 and sim.meta["A"]["stops"] == 0,
+                      "stop_and_wait: braking to a standstill at the crossing counts as a full stop")
+    failures += check(bool(standstill) and set(standstill) == {(10, 9)},
+                      f"stop_and_wait: the robot drives up to the shared cell and stops at its entry ({sorted(set(standstill))})")
+    base_time = sim.time
+    sim, _, slowest, order = drive("nexus")
+    m = sim.metrics()
+    failures += check(sim.counters["stops"] == 0 and slowest["B"] > 0.15 and order[:1] == ["A"]
+                      and m["safety_violations"] == 0 and sim.min_separation >= 1.0,
+                      f"nexus: B slows (min {slowest['B']:.2f} m/s) and crosses behind A without stopping")
+    failures += check(sim.time < base_time, f"nexus crossing is quicker ({sim.time:.1f} s vs {base_time:.1f} s)")
     sim = GridSimulation(Layout(crossing(4)))
     sim.run(max_steps=600)
     failures += check(sim.counters["stops"] == 0, "no full stop when the crossing is clear in time")
+
+    # ---------------------------------------------------------- lane change / cost-aware rerouting
+    sim = GridSimulation(Layout(load_layout("layouts/head_on_2.json").to_dict()))
+    sim.run(max_steps=1000)
+    lane = [e["text"] for e in sim.events if "changes lane" in e["text"]]
+    failures += check(lane and "detour vs" in lane[0] and sim.counters["stops"] == 0 and sim.counters["backoffs"] == 0,
+                      f"nexus: head-on on a two-way floor -> lane change instead of meeting and backing off ({lane[:1]})")
+    sim = GridSimulation(Layout(crossing(0)))
+    for _ in range(40):
+        sim.step()
+    a, b = sim._agent("A"), sim._agent("B")
+    failures += check(not sim._detour(b, set(sim._remaining_cells(a)), 0.5, sim.time, "test")
+                      and not sim._detour(b, set(sim._remaining_cells(a)), 1.5, sim.time, "test"),
+                      "no detour when it costs more than the expected wait")
+
+    # ---------------------------------------------------------- crossing order never closes a wait loop
+    sim = GridSimulation(Layout(load_layout("layouts/cross_traffic_6.json").to_dict()))
+    r1, r2, r3 = (sim._agent(r) for r in ("R1", "R2", "R3"))
+    sim._waits_for_graph = lambda: {"R1": {"R2"}, "R2": {"R3"}, "R3": set()}
+    w, l = sim._acyclic_order(r3, r1)   # R1 giving way to R3 is fine (R3 waits for nobody)
+    failures += check(w is r3 and l is r1, "acyclic order kept when no loop")
+    w, l = sim._acyclic_order(r1, r3)   # R3 giving way to R1 would close R1->R2->R3->R1
+    failures += check(w is r3 and l is r1, "order flipped when it would close a wait loop")
+    sim._waits_for_graph = lambda: {"R1": {"R3"}, "R3": {"R1"}}
+    failures += check(sim._acyclic_order(r1, r3) == (None, None), "no order when both would close a loop")
 
     # ---------------------------------------------------------- scenarios
     for name, scenario in SCENARIOS.items():
@@ -105,6 +155,12 @@ def main():
     a1 = SCENARIOS["intersection"]["build"](1)[1]
     a2 = SCENARIOS["intersection"]["build"](2)[1]
     failures += check(a1 != a2, "different seeds give different task lists")
+
+    # ---------------------------------------------------------- liveness (both strategies)
+    for strategy in ("stop_and_wait", "nexus"):
+        run = run_one("rack_aisles", strategy, 1)
+        failures += check(run["completed"] and run["collisions"] == 0,
+                          f"{strategy}: rack aisles seed 1 finishes (formerly a gridlock) in {run['completion_time']} s")
 
     # ---------------------------------------------------------- harness
     run = run_one("head_on", "stop_and_wait", 1)

@@ -91,9 +91,10 @@ def _tasks(rng: random.Random, n: int, pairs: Callable[[random.Random], Tuple[st
 # Scenarios
 # ======================================================================
 
-def intersection(seed: int) -> Tuple[Dict[str, Any], List[Tuple[str, str]]]:
-    """Four 2-lane roads meeting at one intersection; 8 dispatched AMRs and
-    every order goes to another side, so every trip crosses the centre."""
+def intersection(seed: int, per_side: int = 2) -> Tuple[Dict[str, Any], List[Tuple[str, str]]]:
+    """Four 2-lane roads meeting at one intersection; per_side AMRs park at
+    each road end and every order goes to another side, so every trip
+    crosses the centre."""
     g = GridBuilder(25, 25, "Benchmark: 4-way intersection")
     g.paint(1, 11, 23, 11, ">"); g.paint(1, 12, 23, 12, "<")      # east / west (keep right)
     g.paint(12, 1, 12, 23, "^"); g.paint(11, 1, 11, 23, "v")      # north / south
@@ -101,10 +102,10 @@ def intersection(seed: int) -> Tuple[Dict[str, Any], List[Tuple[str, str]]]:
     # turning pads at each road end so robots can reach both lanes
     g.paint(1, 11, 1, 12, "+"); g.paint(23, 11, 23, 12, "+"); g.paint(11, 1, 12, 1, "+"); g.paint(11, 23, 12, 23, "+")
     sides = {
-        "W": [((0, 11), (0, 12)), ((1, 10), (1, 13))],
-        "E": [((24, 11), (24, 12)), ((23, 10), (23, 13))],
-        "S": [((11, 0), (12, 0)), ((10, 1), (13, 1))],
-        "N": [((11, 24), (12, 24)), ((10, 23), (13, 23))],
+        "W": [((0, 11), (0, 12)), [(1, 10), (1, 13), (2, 10), (2, 13)][:per_side]],
+        "E": [((24, 11), (24, 12)), [(23, 10), (23, 13), (22, 10), (22, 13)][:per_side]],
+        "S": [((11, 0), (12, 0)), [(10, 1), (13, 1), (10, 2), (13, 2)][:per_side]],
+        "N": [((11, 24), (12, 24)), [(10, 23), (13, 23), (10, 22), (13, 22)][:per_side]],
     }
     transfer: Dict[str, List[str]] = {}
     for side, (docks, parks) in sides.items():
@@ -123,7 +124,7 @@ def intersection(seed: int) -> Tuple[Dict[str, Any], List[Tuple[str, str]]]:
         a, b = r.sample(list(transfer), 2)
         return r.choice(transfer[a]), r.choice(transfer[b])
 
-    return g.layout(), _tasks(rng, 32, pair)
+    return g.layout(), _tasks(rng, 16 * per_side, pair)
 
 
 def corridor(seed: int) -> Tuple[Dict[str, Any], List[Tuple[str, str]]]:
@@ -213,6 +214,8 @@ def fixed_layout(name: str) -> Callable[[int], Tuple[Dict[str, Any], List]]:
 
 SCENARIOS: Dict[str, Dict[str, Any]] = {
     "intersection": {"build": intersection, "title": "4-way intersection (8 AMRs, 32 orders)", "seeded": True},
+    "intersection_12": {"build": lambda seed: intersection(seed, 3), "title": "4-way intersection, busy (12 AMRs, 48 orders)", "seeded": True},
+    "intersection_16": {"build": lambda seed: intersection(seed, 4), "title": "4-way intersection, peak (16 AMRs, 64 orders)", "seeded": True, "heavy": True},
     "corridor": {"build": corridor, "title": "Choke-point corridor + passing bay (6 AMRs, 24 orders)", "seeded": True},
     "rack_aisles": {"build": rack_aisles, "title": "Rack aisles with crossings (8 AMRs, 32 orders)", "seeded": True},
     "head_on": {"build": fixed_layout("head_on_2"), "title": "Head-on swap (2 robots)", "seeded": False},
