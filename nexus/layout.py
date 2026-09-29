@@ -105,7 +105,12 @@ DEFAULT_SIMULATION = {
     "angular_speed": 2.0,
     "turn_penalty": 1.0,
     "reservation_lookahead": 3,
+    # Coordination strategy: "nexus" (default) or "stop_and_wait" (the
+    # classical baseline used for benchmarking).
+    "strategy": "nexus",
 }
+
+STRATEGIES = ("nexus", "stop_and_wait")
 
 
 class LayoutError(ValueError):
@@ -347,6 +352,9 @@ class Layout:
                 routable.append((robot, start, goal))
 
         self._validate_flows(add)
+        if self.simulation.get("strategy", "nexus") not in STRATEGIES:
+            add("error", f"Unknown coordination strategy '{self.simulation.get('strategy')}' "
+                f"(use {' or '.join(STRATEGIES)})", "simulation")
 
         goals: Dict[Cell, str] = {}
         for robot in self.robots:

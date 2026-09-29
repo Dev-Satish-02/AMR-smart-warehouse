@@ -100,6 +100,7 @@ class GridSimulation:
         self.time_step = float(sim["time_step"])
         self.max_time = float(sim["max_time"])
         self.lookahead = int(sim["reservation_lookahead"])
+        self.strategy = sim.get("strategy", "nexus")
 
         self.grid = LaneGrid(layout, turn_penalty=float(sim["turn_penalty"]))
         self.planner = NEXUSPlanner(grid=self.grid)
@@ -141,6 +142,7 @@ class GridSimulation:
             "deadlocks_resolved": 0,
             "safety_violations": 0,
             "trips_completed": 0,
+            "stops": 0,
         }
         self.min_separation = float("inf")
         self.estop = False
@@ -209,6 +211,8 @@ class GridSimulation:
                 "stall_since": None,
                 "charges": 0,
                 "time_in": {c: 0.0 for c in TIME_CATEGORIES},
+                "stops": 0,
+                "last_speed": 0.0,
             }
 
             if dispatched:
@@ -494,6 +498,9 @@ class GridSimulation:
     # ------------------------------------------------------------------
 
     def _release_conflicts(self, now: float):
+        if self.strategy == "stop_and_wait":
+            self._release_stop_and_wait(now)
+            return
         for pair, info in list(self.active_conflicts.items()):
             winner, loser = info["winner"], info["loser"]
             point = info["position"]
@@ -522,6 +529,9 @@ class GridSimulation:
             info["loser"].resume()
 
     def _negotiate(self, conflicts: List[PredictedConflict], now: float):
+        if self.strategy == "stop_and_wait":
+            self._negotiate_stop_and_wait(conflicts, now)
+            return
         for conflict in conflicts:
             pair = tuple(sorted([conflict.robot_a, conflict.robot_b]))
             if pair in self.active_conflicts:
@@ -564,6 +574,52 @@ class GridSimulation:
                 position=[float(v) for v in conflict.conflict_position],
                 pair=[a.robot_id, b.robot_id],
             )
+
+    # ------------------------------------------------------------------
+    # Classical stop-and-wait (benchmark baseline)
+    # ------------------------------------------------------------------
+
+    def _negotiate_stop_and_wait(self, conflicts: List[PredictedConflict], now: float):
+        """Traditional traffic rule for overlapping paths: fixed priority by
+        robot ID; the lower-priority robot stops and waits until the other has
+        passed every cell their remaining paths share. No rerouting."""
+        for conflict in conflicts:
+            pair = tuple(sorted([conflict.robot_a, conflict.robot_b]))
+            if pair in self.active_conflicts:
+                continue
+            a, b = self._agent(conflict.robot_a), self._agent(conflict.robot_b)
+            if a is None or b is None or a.stopped or b.stopped:
+                continue
+            if a.robot_id in self.yielding or b.robot_id in self.yielding:
+                continue
+            if not self._needs_negotiation(a, b):
+                continue
+            winner, loser = (a, b) if a.robot_id < b.robot_id else (b, a)
+            shared = set(self._remaining_cells(winner)) & (set(self._remaining_cells(loser)) | set(self._occupied(loser)))
+            loser.stop(reason=f"WAIT_FOR_{winner.robot_id}")
+            self.counters["conflicts_predicted"] += 1
+            self.counters["negotiations"] += 1
+            self.active_conflicts[pair] = {
+                "winner": winner, "loser": loser, "since": now, "shared": shared,
+                "position": np.asarray(conflict.conflict_position, dtype=float).copy(),
+            }
+            self._event("conflict", f"Conflict {a.robot_id}↔{b.robot_id}: {loser.robot_id} stops and waits for "
+                        f"{winner.robot_id} to clear {len(shared)} shared cell(s) (fixed priority)",
+                        winner.robot_id, position=[float(v) for v in conflict.conflict_position],
+                        pair=[a.robot_id, b.robot_id])
+
+    def _release_stop_and_wait(self, now: float):
+        for pair, info in list(self.active_conflicts.items()):
+            winner, loser = info["winner"], info["loser"]
+            still = set(self._remaining_cells(winner)) | set(self._occupied(winner))
+            gone = winner.intent == "ARRIVED" or not self._remaining_cells(winner)
+            if not (info["shared"] & still) or gone or now - info["since"] > 60.0:
+                self._event("resume", f"{winner.robot_id} cleared the shared path -> {loser.robot_id} resumes", loser.robot_id)
+                self._drop_conflict(pair)
+        losers = {info["loser"].robot_id for info in self.active_conflicts.values()}
+        for agent in self.agents:
+            if agent.stopped and agent.robot_id not in losers and agent.robot_id not in self.yielding:
+                agent.resume()
 
     def _needs_negotiation(self, a: RobotAgent, b: RobotAgent) -> bool:
         """
@@ -679,7 +735,9 @@ class GridSimulation:
                     or self.meta[blocker_id]["blocked_since"] is not None):
                 continue
 
-            if agent.replan_around(blocker.state.position, obstacle_radius=0.6 * self.layout.cell_size):
+            # The classical baseline never reroutes: it waits (or the parked
+            # blocker makes way).
+            if self.strategy == "nexus" and agent.replan_around(blocker.state.position, obstacle_radius=0.6 * self.layout.cell_size):
                 agent.advance_waypoint()
                 self.counters["reroutes"] += 1
                 meta["reroute_flash"] = now + 1.5
@@ -848,6 +906,12 @@ class GridSimulation:
             meta["status"] = status
             if account:
                 meta["time_in"][TIME_CATEGORY.get(status, "idle")] += self.time_step
+                # A full stop: braking to a standstill because of traffic
+                # (not at a station, a turn, a hold or an E-stop).
+                if status in ("WAITING", "YIELDING") and robot.speed < 1e-3 and meta["last_speed"] > 0.05:
+                    meta["stops"] += 1
+                    self.counters["stops"] += 1
+                meta["last_speed"] = robot.speed
             if status in ("WAITING", "YIELDING"):
                 if meta["stall_since"] is None:
                     meta["stall_since"] = now
@@ -880,6 +944,7 @@ class GridSimulation:
             "utilisation": round(moving / max(len(self.agents), 1), 3),
             "min_separation": None if self.min_separation == float("inf") else round(self.min_separation, 2),
             "held": sum(1 for a in self.agents if self.meta[a.robot_id]["hold"]),
+            "strategy": self.strategy,
             "estop": self.estop,
             **self.counters,
         }
@@ -919,6 +984,7 @@ class GridSimulation:
                 "home": list(meta["home_cell"]),
                 "hold": meta["hold"],
                 "charges": meta["charges"],
+                "stops": meta["stops"],
                 "time_in": {k: round(v, 1) for k, v in meta["time_in"].items()},
             })
         return {

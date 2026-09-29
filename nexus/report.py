@@ -80,6 +80,7 @@ def build_report(sim) -> Dict[str, Any]:
             "distance_m": round(agent.robot.distance_travelled, 1),
             "battery": None if meta["battery"] is None else round(meta["battery"], 1),
             "charges": meta["charges"],
+            "stops": meta.get("stops", 0),
             "time_in": time_in,
             "utilisation": round((time_in["moving"] + time_in["handling"]) / span, 3),
             "waiting_share": round(time_in["waiting"] / span, 3),
@@ -111,6 +112,8 @@ def build_report(sim) -> Dict[str, Any]:
             "distance_m": round(sum(r["distance_m"] for r in robots), 1),
             "robots": len(robots),
             "charges": sum(r["charges"] for r in robots),
+            "stops": counters.get("stops", 0),
+            "strategy": sim.strategy,
         },
         "time_breakdown": {c: round(totals[c] / fleet_time, 4) for c in TIME_CATEGORIES},
         "timeline": {"bucket_seconds": size, "counts": buckets},
@@ -154,11 +157,11 @@ def missions_csv(sim) -> str:
 
 def robots_csv(sim) -> str:
     report = build_report(sim)
-    rows = [["robot", "mode", "status", "completed", "distance_m", "battery_pct", "charges", "utilisation",
+    rows = [["robot", "mode", "status", "completed", "distance_m", "battery_pct", "charges", "stops", "utilisation",
              *[f"{c}_s" for c in TIME_CATEGORIES]]]
     for r in report["robots"]:
         rows.append([r["id"], r["mode"], r["status"], r["completed"], r["distance_m"],
-                     "" if r["battery"] is None else r["battery"], r["charges"], r["utilisation"],
+                     "" if r["battery"] is None else r["battery"], r["charges"], r["stops"], r["utilisation"],
                      *[r["time_in"][c] for c in TIME_CATEGORIES]])
     return _csv(rows)
 
