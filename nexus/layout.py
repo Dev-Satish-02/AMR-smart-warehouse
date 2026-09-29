@@ -110,7 +110,7 @@ DEFAULT_SIMULATION = {
     "strategy": "nexus",
 }
 
-STRATEGIES = ("nexus", "stop_and_wait")
+STRATEGIES = ("nexus", "stop_and_wait", "zone_lock")
 
 
 class LayoutError(ValueError):

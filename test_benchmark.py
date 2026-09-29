@@ -2,7 +2,7 @@
 Benchmark harness and the classical stop-and-wait baseline
 (nexus/benchmark.py, simulation.strategy = "stop_and_wait").
 
-Checks the baseline behaves like a traditional stop-and-wait controller
+Checks the baselines behave like traditional controllers (stop-and-wait, zone lock)
 (fixed priority, waits until the other robot has cleared the shared path,
 never reroutes), that the full-stop metric counts, that every benchmark
 scenario is valid, and that the harness reports correct comparisons.
@@ -156,6 +156,40 @@ def main():
     a2 = SCENARIOS["intersection"]["build"](2)[1]
     failures += check(a1 != a2, "different seeds give different task lists")
 
+    # ---------------------------------------------------------- zone-lock baseline
+    sim = GridSimulation(Layout(with_strategy(load_layout("layouts/cross_traffic_6.json").to_dict(), "zone_lock")))
+    shared_zone = False
+    for _ in range(4000):
+        sim.step()
+        owners = {}
+        for agent in sim.agents:
+            if agent.robot_id in sim.yielding:
+                continue
+            for zone in {sim._zone(c) for c in sim._occupied(agent)} - {None}:
+                if owners.setdefault(zone, agent.robot_id) != agent.robot_id:
+                    shared_zone = True
+        if sim.status != "RUNNING":
+            break
+    m = sim.metrics()
+    failures += check(sim.status == "COMPLETED" and m["safety_violations"] == 0 and m["reroutes"] == 0 and not shared_zone,
+                      f"zone_lock: one robot per block, no rerouting, finishes safely (t={m['time']} s)")
+    failures += check(m["stops"] >= len(sim.agents), f"zone_lock: robots stop at zone control points ({m['stops']} stops)")
+    run = run_one("city_grid", "zone_lock", 1)
+    failures += check(run["completed"] and run["collisions"] == 0, f"zone_lock: city grid finishes ({run['completion_time']} s)")
+
+    # ---------------------------------------------------------- space-time planning (NEXUS)
+    from algorithms.spacetime import SpaceTimePlanner
+    st = SpaceTimePlanner(Layout(crossing(0)))
+    free = st.plan((0, 10), (20, 10), 0.0, {})
+    busy = st.plan((0, 10), (20, 10), 0.0, {(10, 10): [(8.0, 14.0)]})
+    failures += check(bool(free) and abs(free[-1][1] - 20.0) < 1e-6 and bool(busy) and busy[-1][1] >= 24.0 - 1e-6
+                      and all(t < 8.0 or t > 14.0 for c, t in busy if c == (10, 10)),
+                      f"space-time planner waits for a reserved crossing ({free[-1][1]:.1f} s free, {busy[-1][1]:.1f} s busy)")
+    sim = GridSimulation(Layout(crossing(0)))
+    plan = sim.st_plans.get("B")
+    failures += check(plan is not None and len(plan["times"]) == len(sim._agent("B").planned_path),
+                      "NEXUS robots start with a space-time plan (broadcast to peers)")
+
     # ---------------------------------------------------------- liveness (both strategies)
     for strategy in ("stop_and_wait", "nexus"):
         run = run_one("rack_aisles", strategy, 1)
@@ -188,8 +222,13 @@ def main():
 
     result = run_suite(["head_on", "cross_traffic"], seeds=1, jobs=1)
     table = format_table(result)
-    failures += check(len(result["runs"]) == 4 and "Head-on swap" in table and "Cross traffic" in table
-                      and "total task completion time reduction" in table, "run_suite runs both strategies and prints a table")
+    failures += check(len(result["runs"]) == 6 and "Head-on swap" in table and "Cross traffic" in table
+                      and "total completion time" in table and "Zone lock" in table,
+                      "run_suite runs all three strategies and prints a table")
+    o = result["summary"]["overall"]
+    failures += check(result["summary"]["primary"] == "zone_lock" and set(o["by_baseline"]) == {"zone_lock", "stop_and_wait"}
+                      and o["total_completion_reduction"] == o["by_baseline"]["zone_lock"]["total_completion_reduction"],
+                      "headline is NEXUS vs zone lock; stop-and-wait reported alongside")
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "out.json"
         path.write_text(json.dumps(result))

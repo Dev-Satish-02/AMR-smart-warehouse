@@ -2,19 +2,35 @@
   "runs": [
     {
       "scenario": "intersection",
+      "strategy": "zone_lock",
+      "seed": 1,
+      "completed": true,
+      "completion_time": 403.1,
+      "mean_task_time": 225.6,
+      "tasks": 32,
+      "stops": 148,
+      "waiting_share": 0.2725,
+      "collisions": 0,
+      "deadlocks": 4,
+      "reroutes": 0,
+      "negotiations": 4,
+      "wall_seconds": 22.1
+    },
+    {
+      "scenario": "intersection",
       "strategy": "stop_and_wait",
       "seed": 1,
       "completed": true,
-      "completion_time": 329.7,
-      "mean_task_time": 173.7,
+      "completion_time": 346.4,
+      "mean_task_time": 181.0,
       "tasks": 32,
-      "stops": 51,
-      "waiting_share": 0.1655,
+      "stops": 65,
+      "waiting_share": 0.1767,
       "collisions": 0,
-      "deadlocks": 8,
+      "deadlocks": 7,
       "reroutes": 0,
-      "negotiations": 16,
-      "wall_seconds": 18.6
+      "negotiations": 19,
+      "wall_seconds": 19.6
     },
     {
       "scenario": "intersection",
@@ -30,7 +46,23 @@
       "deadlocks": 1,
       "reroutes": 11,
       "negotiations": 29,
-      "wall_seconds": 18.6
+      "wall_seconds": 17.7
+    },
+    {
+      "scenario": "intersection",
+      "strategy": "zone_lock",
+      "seed": 2,
+      "completed": true,
+      "completion_time": 381.8,
+      "mean_task_time": 207.5,
+      "tasks": 32,
+      "stops": 136,
+      "waiting_share": 0.227,
+      "collisions": 0,
+      "deadlocks": 6,
+      "reroutes": 0,
+      "negotiations": 6,
+      "wall_seconds": 24.0
     },
     {
       "scenario": "intersection",
@@ -46,23 +78,39 @@
       "deadlocks": 9,
       "reroutes": 0,
       "negotiations": 33,
-      "wall_seconds": 18.8
+      "wall_seconds": 18.9
     },
     {
       "scenario": "intersection",
       "strategy": "nexus",
       "seed": 2,
       "completed": true,
-      "completion_time": 301.2,
-      "mean_task_time": 160.1,
+      "completion_time": 306.1,
+      "mean_task_time": 160.2,
       "tasks": 32,
-      "stops": 47,
-      "waiting_share": 0.1301,
+      "stops": 52,
+      "waiting_share": 0.1342,
       "collisions": 0,
       "deadlocks": 1,
-      "reroutes": 7,
-      "negotiations": 22,
-      "wall_seconds": 20.5
+      "reroutes": 10,
+      "negotiations": 23,
+      "wall_seconds": 19.7
+    },
+    {
+      "scenario": "intersection",
+      "strategy": "zone_lock",
+      "seed": 3,
+      "completed": true,
+      "completion_time": 359.2,
+      "mean_task_time": 186.4,
+      "tasks": 32,
+      "stops": 134,
+      "waiting_share": 0.2234,
+      "collisions": 0,
+      "deadlocks": 9,
+      "reroutes": 0,
+      "negotiations": 9,
+      "wall_seconds": 20.2
     },
     {
       "scenario": "intersection",
@@ -78,55 +126,87 @@
       "deadlocks": 8,
       "reroutes": 0,
       "negotiations": 15,
-      "wall_seconds": 19.1
+      "wall_seconds": 17.5
     },
     {
       "scenario": "intersection",
       "strategy": "nexus",
       "seed": 3,
       "completed": true,
-      "completion_time": 316.5,
-      "mean_task_time": 161.4,
+      "completion_time": 340.6,
+      "mean_task_time": 173.5,
       "tasks": 32,
-      "stops": 58,
-      "waiting_share": 0.1489,
+      "stops": 62,
+      "waiting_share": 0.1458,
       "collisions": 0,
       "deadlocks": 0,
-      "reroutes": 13,
-      "negotiations": 16,
-      "wall_seconds": 19.8
+      "reroutes": 9,
+      "negotiations": 19,
+      "wall_seconds": 20.9
+    },
+    {
+      "scenario": "intersection_12",
+      "strategy": "zone_lock",
+      "seed": 1,
+      "completed": true,
+      "completion_time": 457.1,
+      "mean_task_time": 240.0,
+      "tasks": 48,
+      "stops": 259,
+      "waiting_share": 0.3523,
+      "collisions": 0,
+      "deadlocks": 23,
+      "reroutes": 0,
+      "negotiations": 51,
+      "wall_seconds": 37.7
     },
     {
       "scenario": "intersection_12",
       "strategy": "stop_and_wait",
       "seed": 1,
       "completed": true,
-      "completion_time": 374.6,
-      "mean_task_time": 199.3,
+      "completion_time": 383.9,
+      "mean_task_time": 199.7,
       "tasks": 48,
-      "stops": 157,
-      "waiting_share": 0.2742,
+      "stops": 162,
+      "waiting_share": 0.269,
       "collisions": 0,
-      "deadlocks": 19,
+      "deadlocks": 21,
       "reroutes": 0,
-      "negotiations": 56,
-      "wall_seconds": 36.3
+      "negotiations": 57,
+      "wall_seconds": 28.4
     },
     {
       "scenario": "intersection_12",
       "strategy": "nexus",
       "seed": 1,
       "completed": true,
-      "completion_time": 339.0,
-      "mean_task_time": 179.6,
+      "completion_time": 354.0,
+      "mean_task_time": 181.3,
       "tasks": 48,
-      "stops": 117,
-      "waiting_share": 0.2104,
+      "stops": 124,
+      "waiting_share": 0.2198,
       "collisions": 0,
-      "deadlocks": 2,
-      "reroutes": 18,
-      "negotiations": 46,
-      "wall_seconds": 33.3
+      "deadlocks": 3,
+      "reroutes": 27,
+      "negotiations": 53,
+      "wall_seconds": 29.7
+    },
+    {
+      "scenario": "intersection_12",
+      "strategy": "zone_lock",
+      "seed": 2,
+      "completed": true,
+      "completion_time": 514.4,
+      "mean_task_time": 222.8,
+      "tasks": 48,
+      "stops": 257,
+      "waiting_share": 0.282,
+      "collisions": 0,
+      "deadlocks": 16,
+      "reroutes": 0,
+      "negotiations": 22,
+      "wall_seconds": 38.2
     },
     {
       "scenario": "intersection_12",
@@ -142,23 +222,39 @@
       "deadlocks": 18,
       "reroutes": 0,
       "negotiations": 38,
-      "wall_seconds": 34.2
+      "wall_seconds": 29.5
     },
     {
       "scenario": "intersection_12",
       "strategy": "nexus",
       "seed": 2,
       "completed": true,
-      "completion_time": 368.1,
-      "mean_task_time": 183.3,
+      "completion_time": 366.1,
+      "mean_task_time": 189.3,
       "tasks": 48,
-      "stops": 129,
-      "waiting_share": 0.2253,
+      "stops": 143,
+      "waiting_share": 0.2311,
       "collisions": 0,
-      "deadlocks": 0,
-      "reroutes": 24,
-      "negotiations": 52,
-      "wall_seconds": 32.3
+      "deadlocks": 1,
+      "reroutes": 30,
+      "negotiations": 48,
+      "wall_seconds": 32.1
+    },
+    {
+      "scenario": "intersection_12",
+      "strategy": "zone_lock",
+      "seed": 3,
+      "completed": true,
+      "completion_time": 457.1,
+      "mean_task_time": 238.7,
+      "tasks": 48,
+      "stops": 281,
+      "waiting_share": 0.3336,
+      "collisions": 0,
+      "deadlocks": 26,
+      "reroutes": 0,
+      "negotiations": 26,
+      "wall_seconds": 39.8
     },
     {
       "scenario": "intersection_12",
@@ -174,23 +270,39 @@
       "deadlocks": 17,
       "reroutes": 0,
       "negotiations": 43,
-      "wall_seconds": 36.9
+      "wall_seconds": 33.2
     },
     {
       "scenario": "intersection_12",
       "strategy": "nexus",
       "seed": 3,
       "completed": true,
-      "completion_time": 392.3,
-      "mean_task_time": 205.4,
+      "completion_time": 365.4,
+      "mean_task_time": 199.8,
       "tasks": 48,
-      "stops": 160,
-      "waiting_share": 0.2979,
+      "stops": 141,
+      "waiting_share": 0.2678,
       "collisions": 0,
-      "deadlocks": 8,
-      "reroutes": 49,
-      "negotiations": 98,
-      "wall_seconds": 37.5
+      "deadlocks": 6,
+      "reroutes": 28,
+      "negotiations": 45,
+      "wall_seconds": 28.9
+    },
+    {
+      "scenario": "intersection_16",
+      "strategy": "zone_lock",
+      "seed": 1,
+      "completed": true,
+      "completion_time": 681.6,
+      "mean_task_time": 365.1,
+      "tasks": 64,
+      "stops": 480,
+      "waiting_share": 0.4904,
+      "collisions": 0,
+      "deadlocks": 56,
+      "reroutes": 0,
+      "negotiations": 75,
+      "wall_seconds": 73.2
     },
     {
       "scenario": "intersection_16",
@@ -206,23 +318,39 @@
       "deadlocks": 35,
       "reroutes": 0,
       "negotiations": 85,
-      "wall_seconds": 59.5
+      "wall_seconds": 51.7
     },
     {
       "scenario": "intersection_16",
       "strategy": "nexus",
       "seed": 1,
       "completed": true,
-      "completion_time": 416.5,
-      "mean_task_time": 229.1,
+      "completion_time": 437.3,
+      "mean_task_time": 229.8,
       "tasks": 64,
-      "stops": 321,
-      "waiting_share": 0.3442,
+      "stops": 310,
+      "waiting_share": 0.3176,
       "collisions": 0,
-      "deadlocks": 11,
-      "reroutes": 72,
-      "negotiations": 83,
-      "wall_seconds": 47.9
+      "deadlocks": 9,
+      "reroutes": 81,
+      "negotiations": 100,
+      "wall_seconds": 57.7
+    },
+    {
+      "scenario": "intersection_16",
+      "strategy": "zone_lock",
+      "seed": 2,
+      "completed": true,
+      "completion_time": 563.7,
+      "mean_task_time": 279.5,
+      "tasks": 64,
+      "stops": 472,
+      "waiting_share": 0.4424,
+      "collisions": 0,
+      "deadlocks": 38,
+      "reroutes": 0,
+      "negotiations": 38,
+      "wall_seconds": 68.0
     },
     {
       "scenario": "intersection_16",
@@ -238,23 +366,39 @@
       "deadlocks": 32,
       "reroutes": 0,
       "negotiations": 90,
-      "wall_seconds": 59.8
+      "wall_seconds": 54.2
     },
     {
       "scenario": "intersection_16",
       "strategy": "nexus",
       "seed": 2,
       "completed": true,
-      "completion_time": 438.4,
-      "mean_task_time": 228.9,
+      "completion_time": 433.5,
+      "mean_task_time": 228.2,
       "tasks": 64,
-      "stops": 311,
-      "waiting_share": 0.3503,
+      "stops": 351,
+      "waiting_share": 0.3369,
       "collisions": 0,
-      "deadlocks": 7,
+      "deadlocks": 6,
       "reroutes": 63,
-      "negotiations": 65,
-      "wall_seconds": 61.3
+      "negotiations": 82,
+      "wall_seconds": 53.6
+    },
+    {
+      "scenario": "intersection_16",
+      "strategy": "zone_lock",
+      "seed": 3,
+      "completed": true,
+      "completion_time": 548.4,
+      "mean_task_time": 258.4,
+      "tasks": 64,
+      "stops": 377,
+      "waiting_share": 0.421,
+      "collisions": 0,
+      "deadlocks": 58,
+      "reroutes": 0,
+      "negotiations": 58,
+      "wall_seconds": 59.4
     },
     {
       "scenario": "intersection_16",
@@ -270,23 +414,183 @@
       "deadlocks": 55,
       "reroutes": 0,
       "negotiations": 112,
-      "wall_seconds": 60.9
+      "wall_seconds": 54.8
     },
     {
       "scenario": "intersection_16",
       "strategy": "nexus",
       "seed": 3,
       "completed": true,
-      "completion_time": 395.9,
-      "mean_task_time": 209.9,
+      "completion_time": 414.0,
+      "mean_task_time": 214.9,
       "tasks": 64,
-      "stops": 274,
-      "waiting_share": 0.2952,
+      "stops": 282,
+      "waiting_share": 0.2859,
       "collisions": 0,
-      "deadlocks": 10,
-      "reroutes": 58,
-      "negotiations": 94,
-      "wall_seconds": 52.2
+      "deadlocks": 8,
+      "reroutes": 43,
+      "negotiations": 84,
+      "wall_seconds": 51.8
+    },
+    {
+      "scenario": "city_grid",
+      "strategy": "zone_lock",
+      "seed": 1,
+      "completed": true,
+      "completion_time": 399.3,
+      "mean_task_time": 212.3,
+      "tasks": 64,
+      "stops": 528,
+      "waiting_share": 0.2762,
+      "collisions": 0,
+      "deadlocks": 6,
+      "reroutes": 0,
+      "negotiations": 6,
+      "wall_seconds": 49.6
+    },
+    {
+      "scenario": "city_grid",
+      "strategy": "stop_and_wait",
+      "seed": 1,
+      "completed": true,
+      "completion_time": 361.3,
+      "mean_task_time": 188.8,
+      "tasks": 64,
+      "stops": 156,
+      "waiting_share": 0.2005,
+      "collisions": 0,
+      "deadlocks": 23,
+      "reroutes": 0,
+      "negotiations": 56,
+      "wall_seconds": 40.4
+    },
+    {
+      "scenario": "city_grid",
+      "strategy": "nexus",
+      "seed": 1,
+      "completed": true,
+      "completion_time": 344.4,
+      "mean_task_time": 176.6,
+      "tasks": 64,
+      "stops": 169,
+      "waiting_share": 0.1569,
+      "collisions": 0,
+      "deadlocks": 5,
+      "reroutes": 28,
+      "negotiations": 63,
+      "wall_seconds": 45.5
+    },
+    {
+      "scenario": "city_grid",
+      "strategy": "zone_lock",
+      "seed": 2,
+      "completed": true,
+      "completion_time": 423.5,
+      "mean_task_time": 225.0,
+      "tasks": 64,
+      "stops": 535,
+      "waiting_share": 0.2977,
+      "collisions": 0,
+      "deadlocks": 7,
+      "reroutes": 0,
+      "negotiations": 7,
+      "wall_seconds": 51.6
+    },
+    {
+      "scenario": "city_grid",
+      "strategy": "stop_and_wait",
+      "seed": 2,
+      "completed": true,
+      "completion_time": 400.4,
+      "mean_task_time": 213.1,
+      "tasks": 64,
+      "stops": 175,
+      "waiting_share": 0.2632,
+      "collisions": 0,
+      "deadlocks": 35,
+      "reroutes": 0,
+      "negotiations": 70,
+      "wall_seconds": 43.0
+    },
+    {
+      "scenario": "city_grid",
+      "strategy": "nexus",
+      "seed": 2,
+      "completed": true,
+      "completion_time": 323.0,
+      "mean_task_time": 181.1,
+      "tasks": 64,
+      "stops": 136,
+      "waiting_share": 0.1931,
+      "collisions": 0,
+      "deadlocks": 4,
+      "reroutes": 34,
+      "negotiations": 55,
+      "wall_seconds": 43.5
+    },
+    {
+      "scenario": "city_grid",
+      "strategy": "zone_lock",
+      "seed": 3,
+      "completed": true,
+      "completion_time": 393.1,
+      "mean_task_time": 220.5,
+      "tasks": 64,
+      "stops": 523,
+      "waiting_share": 0.2805,
+      "collisions": 0,
+      "deadlocks": 11,
+      "reroutes": 0,
+      "negotiations": 11,
+      "wall_seconds": 51.6
+    },
+    {
+      "scenario": "city_grid",
+      "strategy": "stop_and_wait",
+      "seed": 3,
+      "completed": true,
+      "completion_time": 341.8,
+      "mean_task_time": 185.2,
+      "tasks": 64,
+      "stops": 148,
+      "waiting_share": 0.1788,
+      "collisions": 0,
+      "deadlocks": 18,
+      "reroutes": 0,
+      "negotiations": 63,
+      "wall_seconds": 37.7
+    },
+    {
+      "scenario": "city_grid",
+      "strategy": "nexus",
+      "seed": 3,
+      "completed": true,
+      "completion_time": 328.2,
+      "mean_task_time": 172.5,
+      "tasks": 64,
+      "stops": 127,
+      "waiting_share": 0.1295,
+      "collisions": 0,
+      "deadlocks": 4,
+      "reroutes": 25,
+      "negotiations": 51,
+      "wall_seconds": 43.8
+    },
+    {
+      "scenario": "corridor",
+      "strategy": "zone_lock",
+      "seed": 1,
+      "completed": true,
+      "completion_time": 1334.8,
+      "mean_task_time": 666.9,
+      "tasks": 24,
+      "stops": 174,
+      "waiting_share": 0.6479,
+      "collisions": 0,
+      "deadlocks": 39,
+      "reroutes": 0,
+      "negotiations": 39,
+      "wall_seconds": 73.8
     },
     {
       "scenario": "corridor",
@@ -302,23 +606,39 @@
       "deadlocks": 35,
       "reroutes": 0,
       "negotiations": 45,
-      "wall_seconds": 20.6
+      "wall_seconds": 19.0
     },
     {
       "scenario": "corridor",
       "strategy": "nexus",
       "seed": 1,
       "completed": true,
-      "completion_time": 402.0,
-      "mean_task_time": 209.6,
+      "completion_time": 464.2,
+      "mean_task_time": 251.9,
       "tasks": 24,
-      "stops": 80,
-      "waiting_share": 0.1595,
+      "stops": 100,
+      "waiting_share": 0.143,
       "collisions": 0,
-      "deadlocks": 23,
-      "reroutes": 9,
-      "negotiations": 41,
-      "wall_seconds": 21.7
+      "deadlocks": 31,
+      "reroutes": 32,
+      "negotiations": 45,
+      "wall_seconds": 23.6
+    },
+    {
+      "scenario": "corridor",
+      "strategy": "zone_lock",
+      "seed": 2,
+      "completed": true,
+      "completion_time": 1165.0,
+      "mean_task_time": 625.6,
+      "tasks": 24,
+      "stops": 147,
+      "waiting_share": 0.6995,
+      "collisions": 0,
+      "deadlocks": 33,
+      "reroutes": 0,
+      "negotiations": 33,
+      "wall_seconds": 65.5
     },
     {
       "scenario": "corridor",
@@ -334,23 +654,39 @@
       "deadlocks": 34,
       "reroutes": 0,
       "negotiations": 48,
-      "wall_seconds": 18.7
+      "wall_seconds": 15.7
     },
     {
       "scenario": "corridor",
       "strategy": "nexus",
       "seed": 2,
       "completed": true,
-      "completion_time": 481.1,
-      "mean_task_time": 274.6,
+      "completion_time": 427.5,
+      "mean_task_time": 239.8,
       "tasks": 24,
-      "stops": 111,
-      "waiting_share": 0.2512,
+      "stops": 69,
+      "waiting_share": 0.1244,
       "collisions": 0,
-      "deadlocks": 33,
-      "reroutes": 18,
-      "negotiations": 50,
-      "wall_seconds": 22.7
+      "deadlocks": 28,
+      "reroutes": 19,
+      "negotiations": 53,
+      "wall_seconds": 21.6
+    },
+    {
+      "scenario": "corridor",
+      "strategy": "zone_lock",
+      "seed": 3,
+      "completed": true,
+      "completion_time": 1241.2,
+      "mean_task_time": 700.6,
+      "tasks": 24,
+      "stops": 172,
+      "waiting_share": 0.6827,
+      "collisions": 0,
+      "deadlocks": 49,
+      "reroutes": 0,
+      "negotiations": 49,
+      "wall_seconds": 65.9
     },
     {
       "scenario": "corridor",
@@ -360,29 +696,45 @@
       "completion_time": 456.6,
       "mean_task_time": 240.6,
       "tasks": 24,
-      "stops": 130,
+      "stops": 131,
       "waiting_share": 0.276,
       "collisions": 0,
       "deadlocks": 50,
       "reroutes": 0,
       "negotiations": 55,
-      "wall_seconds": 22.7
+      "wall_seconds": 19.7
     },
     {
       "scenario": "corridor",
       "strategy": "nexus",
       "seed": 3,
       "completed": true,
-      "completion_time": 439.9,
-      "mean_task_time": 244.6,
+      "completion_time": 408.2,
+      "mean_task_time": 245.4,
       "tasks": 24,
-      "stops": 118,
-      "waiting_share": 0.1818,
+      "stops": 102,
+      "waiting_share": 0.1999,
       "collisions": 0,
-      "deadlocks": 33,
-      "reroutes": 6,
-      "negotiations": 48,
-      "wall_seconds": 20.8
+      "deadlocks": 37,
+      "reroutes": 15,
+      "negotiations": 49,
+      "wall_seconds": 20.9
+    },
+    {
+      "scenario": "rack_aisles",
+      "strategy": "zone_lock",
+      "seed": 1,
+      "completed": true,
+      "completion_time": 511.4,
+      "mean_task_time": 288.0,
+      "tasks": 32,
+      "stops": 264,
+      "waiting_share": 0.3421,
+      "collisions": 0,
+      "deadlocks": 14,
+      "reroutes": 0,
+      "negotiations": 14,
+      "wall_seconds": 35.3
     },
     {
       "scenario": "rack_aisles",
@@ -398,87 +750,135 @@
       "deadlocks": 23,
       "reroutes": 0,
       "negotiations": 59,
-      "wall_seconds": 22.5
+      "wall_seconds": 22.4
     },
     {
       "scenario": "rack_aisles",
       "strategy": "nexus",
       "seed": 1,
       "completed": true,
-      "completion_time": 397.0,
-      "mean_task_time": 215.9,
+      "completion_time": 391.6,
+      "mean_task_time": 209.2,
       "tasks": 32,
-      "stops": 82,
-      "waiting_share": 0.1572,
+      "stops": 57,
+      "waiting_share": 0.077,
       "collisions": 0,
-      "deadlocks": 17,
-      "reroutes": 10,
-      "negotiations": 42,
-      "wall_seconds": 29.4
+      "deadlocks": 8,
+      "reroutes": 22,
+      "negotiations": 27,
+      "wall_seconds": 21.9
+    },
+    {
+      "scenario": "rack_aisles",
+      "strategy": "zone_lock",
+      "seed": 2,
+      "completed": true,
+      "completion_time": 538.8,
+      "mean_task_time": 285.6,
+      "tasks": 32,
+      "stops": 261,
+      "waiting_share": 0.3595,
+      "collisions": 0,
+      "deadlocks": 9,
+      "reroutes": 0,
+      "negotiations": 9,
+      "wall_seconds": 32.6
     },
     {
       "scenario": "rack_aisles",
       "strategy": "stop_and_wait",
       "seed": 2,
       "completed": true,
-      "completion_time": 354.8,
-      "mean_task_time": 203.0,
+      "completion_time": 354.2,
+      "mean_task_time": 203.1,
       "tasks": 32,
-      "stops": 64,
-      "waiting_share": 0.1388,
+      "stops": 68,
+      "waiting_share": 0.1389,
       "collisions": 0,
       "deadlocks": 11,
       "reroutes": 0,
-      "negotiations": 26,
-      "wall_seconds": 21.4
+      "negotiations": 29,
+      "wall_seconds": 20.4
     },
     {
       "scenario": "rack_aisles",
       "strategy": "nexus",
       "seed": 2,
       "completed": true,
-      "completion_time": 345.5,
-      "mean_task_time": 200.3,
+      "completion_time": 335.6,
+      "mean_task_time": 197.6,
       "tasks": 32,
-      "stops": 61,
-      "waiting_share": 0.1121,
+      "stops": 55,
+      "waiting_share": 0.0778,
       "collisions": 0,
-      "deadlocks": 6,
-      "reroutes": 5,
-      "negotiations": 28,
-      "wall_seconds": 25.0
+      "deadlocks": 3,
+      "reroutes": 9,
+      "negotiations": 23,
+      "wall_seconds": 20.3
+    },
+    {
+      "scenario": "rack_aisles",
+      "strategy": "zone_lock",
+      "seed": 3,
+      "completed": true,
+      "completion_time": 694.3,
+      "mean_task_time": 312.7,
+      "tasks": 32,
+      "stops": 292,
+      "waiting_share": 0.3451,
+      "collisions": 0,
+      "deadlocks": 19,
+      "reroutes": 0,
+      "negotiations": 19,
+      "wall_seconds": 40.3
     },
     {
       "scenario": "rack_aisles",
       "strategy": "stop_and_wait",
       "seed": 3,
       "completed": true,
-      "completion_time": 476.2,
-      "mean_task_time": 256.8,
+      "completion_time": 453.8,
+      "mean_task_time": 255.5,
       "tasks": 32,
-      "stops": 115,
-      "waiting_share": 0.2587,
+      "stops": 102,
+      "waiting_share": 0.2363,
       "collisions": 0,
-      "deadlocks": 32,
+      "deadlocks": 30,
       "reroutes": 0,
-      "negotiations": 104,
-      "wall_seconds": 27.6
+      "negotiations": 116,
+      "wall_seconds": 26.0
     },
     {
       "scenario": "rack_aisles",
       "strategy": "nexus",
       "seed": 3,
       "completed": true,
-      "completion_time": 404.6,
-      "mean_task_time": 230.1,
+      "completion_time": 360.5,
+      "mean_task_time": 204.4,
       "tasks": 32,
-      "stops": 93,
-      "waiting_share": 0.147,
+      "stops": 61,
+      "waiting_share": 0.0885,
       "collisions": 0,
-      "deadlocks": 15,
+      "deadlocks": 6,
       "reroutes": 13,
-      "negotiations": 42,
-      "wall_seconds": 25.3
+      "negotiations": 21,
+      "wall_seconds": 23.7
+    },
+    {
+      "scenario": "head_on",
+      "strategy": "zone_lock",
+      "seed": 1,
+      "completed": true,
+      "completion_time": 72.3,
+      "mean_task_time": 53.0,
+      "tasks": 2,
+      "stops": 7,
+      "waiting_share": 0.2669,
+      "collisions": 0,
+      "deadlocks": 1,
+      "reroutes": 0,
+      "negotiations": 1,
+      "wall_seconds": 1.6
     },
     {
       "scenario": "head_on",
@@ -494,7 +894,7 @@
       "deadlocks": 1,
       "reroutes": 0,
       "negotiations": 1,
-      "wall_seconds": 0.4
+      "wall_seconds": 0.3
     },
     {
       "scenario": "head_on",
@@ -502,15 +902,31 @@
       "seed": 1,
       "completed": true,
       "completion_time": 33.2,
-      "mean_task_time": 30.0,
+      "mean_task_time": 30.2,
       "tasks": 2,
       "stops": 0,
       "waiting_share": 0.0,
       "collisions": 0,
       "deadlocks": 0,
-      "reroutes": 1,
+      "reroutes": 2,
       "negotiations": 1,
       "wall_seconds": 0.4
+    },
+    {
+      "scenario": "cross_traffic",
+      "strategy": "zone_lock",
+      "seed": 1,
+      "completed": true,
+      "completion_time": 172.3,
+      "mean_task_time": 104.0,
+      "tasks": 6,
+      "stops": 26,
+      "waiting_share": 0.3376,
+      "collisions": 0,
+      "deadlocks": 2,
+      "reroutes": 0,
+      "negotiations": 2,
+      "wall_seconds": 8.2
     },
     {
       "scenario": "cross_traffic",
@@ -526,23 +942,39 @@
       "deadlocks": 3,
       "reroutes": 0,
       "negotiations": 3,
-      "wall_seconds": 2.1
+      "wall_seconds": 2.9
     },
     {
       "scenario": "cross_traffic",
       "strategy": "nexus",
       "seed": 1,
       "completed": true,
-      "completion_time": 47.1,
-      "mean_task_time": 45.6,
+      "completion_time": 45.6,
+      "mean_task_time": 44.4,
       "tasks": 6,
-      "stops": 1,
-      "waiting_share": 0.0188,
+      "stops": 3,
+      "waiting_share": 0.0263,
       "collisions": 0,
       "deadlocks": 0,
-      "reroutes": 3,
-      "negotiations": 3,
-      "wall_seconds": 2.6
+      "reroutes": 2,
+      "negotiations": 1,
+      "wall_seconds": 2.5
+    },
+    {
+      "scenario": "bel_batch",
+      "strategy": "zone_lock",
+      "seed": 1,
+      "completed": true,
+      "completion_time": 910.4,
+      "mean_task_time": 498.4,
+      "tasks": 40,
+      "stops": 627,
+      "waiting_share": 0.1311,
+      "collisions": 0,
+      "deadlocks": 2,
+      "reroutes": 0,
+      "negotiations": 2,
+      "wall_seconds": 69.9
     },
     {
       "scenario": "bel_batch",
@@ -558,23 +990,39 @@
       "deadlocks": 5,
       "reroutes": 0,
       "negotiations": 10,
-      "wall_seconds": 53.1
+      "wall_seconds": 53.2
     },
     {
       "scenario": "bel_batch",
       "strategy": "nexus",
       "seed": 1,
       "completed": true,
-      "completion_time": 788.9,
-      "mean_task_time": 418.1,
+      "completion_time": 791.5,
+      "mean_task_time": 418.7,
       "tasks": 40,
-      "stops": 42,
-      "waiting_share": 0.0284,
+      "stops": 41,
+      "waiting_share": 0.0316,
       "collisions": 0,
-      "deadlocks": 0,
-      "reroutes": 1,
-      "negotiations": 14,
-      "wall_seconds": 51.5
+      "deadlocks": 1,
+      "reroutes": 4,
+      "negotiations": 16,
+      "wall_seconds": 58.5
+    },
+    {
+      "scenario": "bel_batch",
+      "strategy": "zone_lock",
+      "seed": 2,
+      "completed": true,
+      "completion_time": 908.3,
+      "mean_task_time": 512.6,
+      "tasks": 40,
+      "stops": 599,
+      "waiting_share": 0.1387,
+      "collisions": 0,
+      "deadlocks": 1,
+      "reroutes": 0,
+      "negotiations": 1,
+      "wall_seconds": 69.7
     },
     {
       "scenario": "bel_batch",
@@ -590,23 +1038,39 @@
       "deadlocks": 2,
       "reroutes": 0,
       "negotiations": 20,
-      "wall_seconds": 43.6
+      "wall_seconds": 55.1
     },
     {
       "scenario": "bel_batch",
       "strategy": "nexus",
       "seed": 2,
       "completed": true,
-      "completion_time": 766.8,
-      "mean_task_time": 421.2,
+      "completion_time": 733.9,
+      "mean_task_time": 420.6,
       "tasks": 40,
-      "stops": 29,
-      "waiting_share": 0.0248,
+      "stops": 34,
+      "waiting_share": 0.0282,
       "collisions": 0,
-      "deadlocks": 0,
-      "reroutes": 3,
-      "negotiations": 11,
-      "wall_seconds": 50.0
+      "deadlocks": 2,
+      "reroutes": 9,
+      "negotiations": 16,
+      "wall_seconds": 61.7
+    },
+    {
+      "scenario": "bel_batch",
+      "strategy": "zone_lock",
+      "seed": 3,
+      "completed": true,
+      "completion_time": 849.7,
+      "mean_task_time": 444.5,
+      "tasks": 40,
+      "stops": 554,
+      "waiting_share": 0.1192,
+      "collisions": 0,
+      "deadlocks": 3,
+      "reroutes": 0,
+      "negotiations": 3,
+      "wall_seconds": 54.8
     },
     {
       "scenario": "bel_batch",
@@ -622,7 +1086,7 @@
       "deadlocks": 4,
       "reroutes": 0,
       "negotiations": 11,
-      "wall_seconds": 41.1
+      "wall_seconds": 55.6
     },
     {
       "scenario": "bel_batch",
@@ -636,9 +1100,9 @@
       "waiting_share": 0.0248,
       "collisions": 0,
       "deadlocks": 2,
-      "reroutes": 3,
+      "reroutes": 4,
       "negotiations": 14,
-      "wall_seconds": 39.2
+      "wall_seconds": 58.3
     }
   ],
   "summary": {
@@ -646,64 +1110,118 @@
       {
         "scenario": "intersection",
         "title": "4-way intersection (8 AMRs, 32 orders)",
+        "zone_lock": {
+          "runs": 3,
+          "all_completed": true,
+          "completion_time": 381.37,
+          "mean_task_time": 206.5,
+          "stops": 139.33,
+          "waiting_share": 0.24,
+          "collisions": 0,
+          "deadlocks": 6.33
+        },
         "stop_and_wait": {
           "runs": 3,
           "all_completed": true,
-          "completion_time": 347.23,
-          "mean_task_time": 179.47,
-          "stops": 56.0,
+          "completion_time": 352.8,
+          "mean_task_time": 181.9,
+          "stops": 60.67,
           "waiting_share": 0.17,
           "collisions": 0,
-          "deadlocks": 8.33
+          "deadlocks": 8.0
         },
         "nexus": {
           "runs": 3,
           "all_completed": true,
-          "completion_time": 321.93,
-          "mean_task_time": 167.2,
-          "stops": 57.33,
+          "completion_time": 331.6,
+          "mean_task_time": 171.27,
+          "stops": 60.33,
           "waiting_share": 0.14,
           "collisions": 0,
           "deadlocks": 0.67
         },
+        "reductions": {
+          "zone_lock": {
+            "completion_time": 0.1305,
+            "mean_task_time": 0.1706,
+            "stops": 0.567
+          },
+          "stop_and_wait": {
+            "completion_time": 0.0601,
+            "mean_task_time": 0.0584,
+            "stops": 0.0056
+          }
+        },
         "reduction": {
-          "completion_time": 0.0729,
-          "mean_task_time": 0.0684,
-          "stops": -0.0237
+          "completion_time": 0.1305,
+          "mean_task_time": 0.1706,
+          "stops": 0.567
         }
       },
       {
         "scenario": "intersection_12",
         "title": "4-way intersection, busy (12 AMRs, 48 orders)",
+        "zone_lock": {
+          "runs": 3,
+          "all_completed": true,
+          "completion_time": 476.2,
+          "mean_task_time": 233.83,
+          "stops": 265.67,
+          "waiting_share": 0.32,
+          "collisions": 0,
+          "deadlocks": 21.67
+        },
         "stop_and_wait": {
           "runs": 3,
           "all_completed": true,
-          "completion_time": 399.9,
-          "mean_task_time": 207.73,
-          "stops": 147.0,
+          "completion_time": 403.0,
+          "mean_task_time": 207.87,
+          "stops": 148.67,
           "waiting_share": 0.3,
           "collisions": 0,
-          "deadlocks": 18.0
+          "deadlocks": 18.67
         },
         "nexus": {
           "runs": 3,
           "all_completed": true,
-          "completion_time": 366.47,
-          "mean_task_time": 189.43,
-          "stops": 135.33,
+          "completion_time": 361.83,
+          "mean_task_time": 190.13,
+          "stops": 136.0,
           "waiting_share": 0.24,
           "collisions": 0,
           "deadlocks": 3.33
         },
+        "reductions": {
+          "zone_lock": {
+            "completion_time": 0.2402,
+            "mean_task_time": 0.1869,
+            "stops": 0.4881
+          },
+          "stop_and_wait": {
+            "completion_time": 0.1022,
+            "mean_task_time": 0.0853,
+            "stops": 0.0852
+          }
+        },
         "reduction": {
-          "completion_time": 0.0836,
-          "mean_task_time": 0.0881,
-          "stops": 0.0794
+          "completion_time": 0.2402,
+          "mean_task_time": 0.1869,
+          "stops": 0.4881
         }
       },
       {
         "scenario": "intersection_16",
         "title": "4-way intersection, peak (16 AMRs, 64 orders)",
+        "zone_lock": {
+          "runs": 3,
+          "all_completed": true,
+          "completion_time": 597.9,
+          "mean_task_time": 301.0,
+          "stops": 443.0,
+          "waiting_share": 0.45,
+          "collisions": 0,
+          "deadlocks": 50.67
+        },
         "stop_and_wait": {
           "runs": 3,
           "all_completed": true,
@@ -717,28 +1235,101 @@
         "nexus": {
           "runs": 3,
           "all_completed": true,
-          "completion_time": 416.93,
-          "mean_task_time": 222.63,
-          "stops": 302.0,
-          "waiting_share": 0.33,
+          "completion_time": 428.27,
+          "mean_task_time": 224.3,
+          "stops": 314.33,
+          "waiting_share": 0.31,
           "collisions": 0,
-          "deadlocks": 9.33
+          "deadlocks": 7.67
+        },
+        "reductions": {
+          "zone_lock": {
+            "completion_time": 0.2837,
+            "mean_task_time": 0.2548,
+            "stops": 0.2905
+          },
+          "stop_and_wait": {
+            "completion_time": 0.1365,
+            "mean_task_time": 0.1518,
+            "stops": -0.0032
+          }
         },
         "reduction": {
-          "completion_time": 0.1594,
-          "mean_task_time": 0.1581,
-          "stops": 0.0362
+          "completion_time": 0.2837,
+          "mean_task_time": 0.2548,
+          "stops": 0.2905
+        }
+      },
+      {
+        "scenario": "city_grid",
+        "title": "City-grid intersections (16 AMRs, 64 orders)",
+        "zone_lock": {
+          "runs": 3,
+          "all_completed": true,
+          "completion_time": 405.3,
+          "mean_task_time": 219.27,
+          "stops": 528.67,
+          "waiting_share": 0.28,
+          "collisions": 0,
+          "deadlocks": 8.0
+        },
+        "stop_and_wait": {
+          "runs": 3,
+          "all_completed": true,
+          "completion_time": 367.83,
+          "mean_task_time": 195.7,
+          "stops": 159.67,
+          "waiting_share": 0.21,
+          "collisions": 0,
+          "deadlocks": 25.33
+        },
+        "nexus": {
+          "runs": 3,
+          "all_completed": true,
+          "completion_time": 331.87,
+          "mean_task_time": 176.73,
+          "stops": 144.0,
+          "waiting_share": 0.16,
+          "collisions": 0,
+          "deadlocks": 4.33
+        },
+        "reductions": {
+          "zone_lock": {
+            "completion_time": 0.1812,
+            "mean_task_time": 0.194,
+            "stops": 0.7276
+          },
+          "stop_and_wait": {
+            "completion_time": 0.0978,
+            "mean_task_time": 0.0969,
+            "stops": 0.0981
+          }
+        },
+        "reduction": {
+          "completion_time": 0.1812,
+          "mean_task_time": 0.194,
+          "stops": 0.7276
         }
       },
       {
         "scenario": "corridor",
         "title": "Choke-point corridor + passing bay (6 AMRs, 24 orders)",
+        "zone_lock": {
+          "runs": 3,
+          "all_completed": true,
+          "completion_time": 1247.0,
+          "mean_task_time": 664.37,
+          "stops": 164.33,
+          "waiting_share": 0.68,
+          "collisions": 0,
+          "deadlocks": 40.33
+        },
         "stop_and_wait": {
           "runs": 3,
           "all_completed": true,
           "completion_time": 434.27,
           "mean_task_time": 230.8,
-          "stops": 112.67,
+          "stops": 113.0,
           "waiting_share": 0.21,
           "collisions": 0,
           "deadlocks": 39.67
@@ -746,51 +1337,95 @@
         "nexus": {
           "runs": 3,
           "all_completed": true,
-          "completion_time": 441.0,
-          "mean_task_time": 242.93,
-          "stops": 103.0,
-          "waiting_share": 0.2,
+          "completion_time": 433.3,
+          "mean_task_time": 245.7,
+          "stops": 90.33,
+          "waiting_share": 0.16,
           "collisions": 0,
-          "deadlocks": 29.67
+          "deadlocks": 32.0
+        },
+        "reductions": {
+          "zone_lock": {
+            "completion_time": 0.6525,
+            "mean_task_time": 0.6302,
+            "stops": 0.4503
+          },
+          "stop_and_wait": {
+            "completion_time": 0.0022,
+            "mean_task_time": -0.0646,
+            "stops": 0.2006
+          }
         },
         "reduction": {
-          "completion_time": -0.0155,
-          "mean_task_time": -0.0526,
-          "stops": 0.0858
+          "completion_time": 0.6525,
+          "mean_task_time": 0.6302,
+          "stops": 0.4503
         }
       },
       {
         "scenario": "rack_aisles",
         "title": "Rack aisles with crossings (8 AMRs, 32 orders)",
+        "zone_lock": {
+          "runs": 3,
+          "all_completed": true,
+          "completion_time": 581.5,
+          "mean_task_time": 295.43,
+          "stops": 272.33,
+          "waiting_share": 0.35,
+          "collisions": 0,
+          "deadlocks": 14.0
+        },
         "stop_and_wait": {
           "runs": 3,
           "all_completed": true,
-          "completion_time": 407.33,
-          "mean_task_time": 225.87,
-          "stops": 87.33,
-          "waiting_share": 0.18,
+          "completion_time": 399.67,
+          "mean_task_time": 225.47,
+          "stops": 84.33,
+          "waiting_share": 0.17,
           "collisions": 0,
-          "deadlocks": 22.0
+          "deadlocks": 21.33
         },
         "nexus": {
           "runs": 3,
           "all_completed": true,
-          "completion_time": 382.37,
-          "mean_task_time": 215.43,
-          "stops": 78.67,
-          "waiting_share": 0.14,
+          "completion_time": 362.57,
+          "mean_task_time": 203.73,
+          "stops": 57.67,
+          "waiting_share": 0.08,
           "collisions": 0,
-          "deadlocks": 12.67
+          "deadlocks": 5.67
+        },
+        "reductions": {
+          "zone_lock": {
+            "completion_time": 0.3765,
+            "mean_task_time": 0.3104,
+            "stops": 0.7882
+          },
+          "stop_and_wait": {
+            "completion_time": 0.0928,
+            "mean_task_time": 0.0964,
+            "stops": 0.3161
+          }
         },
         "reduction": {
-          "completion_time": 0.0613,
-          "mean_task_time": 0.0462,
-          "stops": 0.0992
+          "completion_time": 0.3765,
+          "mean_task_time": 0.3104,
+          "stops": 0.7882
         }
       },
       {
         "scenario": "head_on",
         "title": "Head-on swap (2 robots)",
+        "zone_lock": {
+          "runs": 1,
+          "all_completed": true,
+          "completion_time": 72.3,
+          "mean_task_time": 53.0,
+          "stops": 7.0,
+          "waiting_share": 0.27,
+          "collisions": 0,
+          "deadlocks": 1.0
+        },
         "stop_and_wait": {
           "runs": 1,
           "all_completed": true,
@@ -805,21 +1440,43 @@
           "runs": 1,
           "all_completed": true,
           "completion_time": 33.2,
-          "mean_task_time": 30.0,
+          "mean_task_time": 30.2,
           "stops": 0.0,
           "waiting_share": 0.0,
           "collisions": 0,
           "deadlocks": 0.0
         },
+        "reductions": {
+          "zone_lock": {
+            "completion_time": 0.5408,
+            "mean_task_time": 0.4302,
+            "stops": 1.0
+          },
+          "stop_and_wait": {
+            "completion_time": 0.0206,
+            "mean_task_time": 0.0033,
+            "stops": 1.0
+          }
+        },
         "reduction": {
-          "completion_time": 0.0206,
-          "mean_task_time": 0.0099,
+          "completion_time": 0.5408,
+          "mean_task_time": 0.4302,
           "stops": 1.0
         }
       },
       {
         "scenario": "cross_traffic",
         "title": "Cross traffic (6 robots)",
+        "zone_lock": {
+          "runs": 1,
+          "all_completed": true,
+          "completion_time": 172.3,
+          "mean_task_time": 104.0,
+          "stops": 26.0,
+          "waiting_share": 0.34,
+          "collisions": 0,
+          "deadlocks": 2.0
+        },
         "stop_and_wait": {
           "runs": 1,
           "all_completed": true,
@@ -833,22 +1490,44 @@
         "nexus": {
           "runs": 1,
           "all_completed": true,
-          "completion_time": 47.1,
-          "mean_task_time": 45.6,
-          "stops": 1.0,
-          "waiting_share": 0.02,
+          "completion_time": 45.6,
+          "mean_task_time": 44.4,
+          "stops": 3.0,
+          "waiting_share": 0.03,
           "collisions": 0,
           "deadlocks": 0.0
         },
+        "reductions": {
+          "zone_lock": {
+            "completion_time": 0.7353,
+            "mean_task_time": 0.5731,
+            "stops": 0.8846
+          },
+          "stop_and_wait": {
+            "completion_time": 0.0637,
+            "mean_task_time": 0.041,
+            "stops": 0.5
+          }
+        },
         "reduction": {
-          "completion_time": 0.0329,
-          "mean_task_time": 0.0151,
-          "stops": 0.8333
+          "completion_time": 0.7353,
+          "mean_task_time": 0.5731,
+          "stops": 0.8846
         }
       },
       {
         "scenario": "bel_batch",
         "title": "BEL Warehouse batch (9 AMRs, 40 orders)",
+        "zone_lock": {
+          "runs": 3,
+          "all_completed": true,
+          "completion_time": 889.47,
+          "mean_task_time": 485.17,
+          "stops": 593.33,
+          "waiting_share": 0.13,
+          "collisions": 0,
+          "deadlocks": 2.0
+        },
         "stop_and_wait": {
           "runs": 3,
           "all_completed": true,
@@ -862,27 +1541,66 @@
         "nexus": {
           "runs": 3,
           "all_completed": true,
-          "completion_time": 773.27,
+          "completion_time": 763.17,
           "mean_task_time": 409.43,
-          "stops": 34.0,
+          "stops": 35.33,
           "waiting_share": 0.03,
           "collisions": 0,
-          "deadlocks": 0.67
+          "deadlocks": 1.67
+        },
+        "reductions": {
+          "zone_lock": {
+            "completion_time": 0.142,
+            "mean_task_time": 0.1561,
+            "stops": 0.9405
+          },
+          "stop_and_wait": {
+            "completion_time": 0.0192,
+            "mean_task_time": -0.0027,
+            "stops": 0.0186
+          }
         },
         "reduction": {
-          "completion_time": 0.0062,
-          "mean_task_time": -0.0027,
-          "stops": 0.0556
+          "completion_time": 0.142,
+          "mean_task_time": 0.1561,
+          "stops": 0.9405
         }
       }
     ],
+    "strategies": [
+      "zone_lock",
+      "stop_and_wait",
+      "nexus"
+    ],
+    "baselines": [
+      "zone_lock",
+      "stop_and_wait"
+    ],
+    "primary": "zone_lock",
     "overall": {
-      "total_completion_reduction": 0.0554,
-      "mean_scenario_reduction": 0.0527,
-      "worst_scenario_reduction": -0.0155,
-      "scenarios_counted": 8,
+      "total_completion_reduction": 0.3591,
+      "mean_scenario_reduction": 0.3647,
+      "worst_scenario_reduction": 0.1305,
+      "scenarios_counted": 9,
       "excluded_timeouts": [],
+      "by_baseline": {
+        "zone_lock": {
+          "total_completion_reduction": 0.3591,
+          "mean_scenario_reduction": 0.3647,
+          "worst_scenario_reduction": 0.1305,
+          "scenarios_counted": 9,
+          "excluded_timeouts": []
+        },
+        "stop_and_wait": {
+          "total_completion_reduction": 0.0672,
+          "mean_scenario_reduction": 0.0661,
+          "worst_scenario_reduction": 0.0022,
+          "scenarios_counted": 9,
+          "excluded_timeouts": []
+        }
+      },
       "timeouts": {
+        "zone_lock": 0,
         "stop_and_wait": 0,
         "nexus": 0
       },
@@ -891,5 +1609,17 @@
     }
   },
   "seeds": 3,
-  "wall_seconds": 126.5
+  "scenarios": [
+    "intersection",
+    "intersection_12",
+    "intersection_16",
+    "city_grid",
+    "corridor",
+    "rack_aisles",
+    "head_on",
+    "cross_traffic",
+    "bel_batch"
+  ],
+  "generated_at": "2026-09-29T21:02:59",
+  "wall_seconds": 230.1
 }

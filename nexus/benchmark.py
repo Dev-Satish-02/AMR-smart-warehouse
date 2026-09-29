@@ -1,15 +1,24 @@
 """
-Benchmark: NEXUS coordination vs a classical stop-and-wait baseline on
-scenarios with overlapping paths.
+Benchmark: NEXUS coordination vs classical baselines on scenarios with
+overlapping paths.
 
     python -m nexus.benchmark                 # full suite, 3 seeds
     python -m nexus.benchmark --quick         # 1 seed, small scenarios only
     python -m nexus.benchmark --scenarios intersection corridor --seeds 5
 
-Both strategies run the SAME layout, robots and task list; only
-simulation.strategy differs ("nexus" vs "stop_and_wait", see
-nexus/grid_simulation.py). Both keep the same safety layer (cell
-reservations, deadlock back-off), so zero collisions is required of both.
+Every strategy runs the SAME layout, robots and task list; only
+simulation.strategy differs (see nexus/grid_simulation.py):
+
+    zone_lock       classical AGV block control (headline baseline): the floor
+                    is cut into 3 x 3 m blocks, one robot per block, a robot
+                    stops dead at a block boundary until the block is free;
+                    fixed shortest routes, fixed ID priority
+    stop_and_wait   pairwise stop-and-wait on predicted conflicts, fixed ID
+                    priority, waits for the whole shared stretch
+    nexus           P2P negotiation, flow-through crossing, cost-aware lane
+                    changes, space-time route planning
+All share the same safety layer (cell reservations, deadlock back-off), so
+zero collisions is required of all.
 
 Metrics per run
     completion_time   total task completion time: when the last task finishes
@@ -17,7 +26,7 @@ Metrics per run
     stops             full stops caused by traffic (braking to a standstill)
     waiting_share     share of robot time spent waiting for other robots
     collisions        safety violations (robots closer than 0.7 m)
-Reduction = 1 - NEXUS / stop-and-wait (positive = NEXUS faster).
+Reduction = 1 - NEXUS / baseline (positive = NEXUS faster), per baseline.
 """
 
 from __future__ import annotations
@@ -35,7 +44,10 @@ from nexus.grid_simulation import GridSimulation
 from nexus.layout import Layout, load_layout
 
 ROOT = Path(__file__).resolve().parent.parent
-STRATEGIES = ("stop_and_wait", "nexus")
+STRATEGIES = ("zone_lock", "stop_and_wait", "nexus")
+BASELINES = ("zone_lock", "stop_and_wait")   # the first one present is the headline
+LABELS = {"zone_lock": "Zone lock", "stop_and_wait": "Stop & wait", "nexus": "NEXUS"}
+SHORT = {"zone_lock": "zone", "stop_and_wait": "S&W", "nexus": "NEXUS"}
 TIMEOUT = 5400.0  # simulated seconds
 
 
@@ -127,6 +139,43 @@ def intersection(seed: int, per_side: int = 2) -> Tuple[Dict[str, Any], List[Tup
     return g.layout(), _tasks(rng, 16 * per_side, pair)
 
 
+def city_grid(seed: int, robots: int = 16, orders: int = 64) -> Tuple[Dict[str, Any], List[Tuple[str, str]]]:
+    """A 4 x 4 grid of two-lane streets (keep right, 16 intersections) with
+    workstations on every block: orders run between random blocks, so paths
+    overlap at many intersections and there are many alternative routes."""
+    size = 29
+    g = GridBuilder(size, size, "Benchmark: city-grid intersections")
+    roads = (3, 10, 17, 24)
+    lo, hi = roads[0], roads[-1] + 1
+    for r in roads:
+        g.paint(lo, r, hi, r, ">"); g.paint(lo, r + 1, hi, r + 1, "<")      # eastbound / westbound
+    for c in roads:
+        g.paint(c, lo, c, hi, "v"); g.paint(c + 1, lo, c + 1, hi, "^")      # southbound / northbound
+    for r in roads:
+        for c in roads:
+            g.paint(c, r, c + 1, r + 1, "+")                                # intersections
+    # blocks between streets: racks, with a workstation on the top and bottom edge
+    work = []
+    for bx in range(3):
+        for by in range(3):
+            x0, x1 = roads[bx] + 2, roads[bx + 1] - 1
+            y0, y1 = roads[by] + 2, roads[by + 1] - 1
+            g.paint(x0, y0, x1, y1, "S")
+            mid = (x0 + x1) // 2
+            for y, tag in ((y0, "S"), (y1, "N")):
+                sid = f"B{bx + 1}{by + 1}{tag}"
+                g.paint(mid, y, mid, y, ".")
+                g.station(sid, "workstation", mid, y, label=f"Block {bx + 1}{by + 1} {tag}")
+                work.append(sid)
+    # parking outside the perimeter streets
+    spots = [(x, lo - 1) for x in (6, 7, 8, 13, 14, 15, 20, 21)] + [(x, hi + 1) for x in (6, 7, 8, 13, 14, 15, 20, 21)]
+    for i, (x, y) in enumerate(spots[:robots]):
+        g.station(f"P{i + 1}", "parking", x, y)
+        g.robots.append({"id": f"R{i + 1}", "mode": "dispatch", "home": f"P{i + 1}"})
+    rng = random.Random(seed)
+    return g.layout(), _tasks(rng, orders, lambda r: tuple(r.sample(work, 2)))
+
+
 def corridor(seed: int) -> Tuple[Dict[str, Any], List[Tuple[str, str]]]:
     """Two work areas joined by a single two-way corridor (choke point) with
     one passing bay; 6 AMRs carry orders in both directions."""
@@ -216,6 +265,7 @@ SCENARIOS: Dict[str, Dict[str, Any]] = {
     "intersection": {"build": intersection, "title": "4-way intersection (8 AMRs, 32 orders)", "seeded": True},
     "intersection_12": {"build": lambda seed: intersection(seed, 3), "title": "4-way intersection, busy (12 AMRs, 48 orders)", "seeded": True},
     "intersection_16": {"build": lambda seed: intersection(seed, 4), "title": "4-way intersection, peak (16 AMRs, 64 orders)", "seeded": True, "heavy": True},
+    "city_grid": {"build": city_grid, "title": "City-grid intersections (16 AMRs, 64 orders)", "seeded": True},
     "corridor": {"build": corridor, "title": "Choke-point corridor + passing bay (6 AMRs, 24 orders)", "seeded": True},
     "rack_aisles": {"build": rack_aisles, "title": "Rack aisles with crossings (8 AMRs, 32 orders)", "seeded": True},
     "head_on": {"build": fixed_layout("head_on_2"), "title": "Head-on swap (2 robots)", "seeded": False},
@@ -282,10 +332,17 @@ def _mean(values: List[float]) -> Optional[float]:
 
 
 def summarise(runs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Per-scenario means per strategy and NEXUS's reduction against each
+    baseline. The headline ("reduction" / top-level "overall" keys) is
+    against the primary baseline: the first of BASELINES present."""
+    present = [k for k in STRATEGIES if any(r["strategy"] == k for r in runs)]
+    baselines = [b for b in BASELINES if b in present]
+    primary = baselines[0] if baselines else None
+    reduction = lambda a, b: round(1 - b / a, 4) if a and b is not None else None
     scenarios = []
     for name in dict.fromkeys(r["scenario"] for r in runs):
         row = {"scenario": name, "title": SCENARIOS[name]["title"]}
-        for strategy in STRATEGIES:
+        for strategy in present:
             mine = [r for r in runs if r["scenario"] == name and r["strategy"] == strategy]
             row[strategy] = {
                 "runs": len(mine),
@@ -297,31 +354,42 @@ def summarise(runs: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "collisions": sum(r["collisions"] for r in mine),
                 "deadlocks": _mean([r["deadlocks"] for r in mine]),
             }
-        base, nexus = row["stop_and_wait"], row["nexus"]
-        reduction = lambda a, b: round(1 - b / a, 4) if a and b is not None else None
-        row["reduction"] = {
-            "completion_time": reduction(base["completion_time"], nexus["completion_time"]),
-            "mean_task_time": reduction(base["mean_task_time"], nexus["mean_task_time"]),
-            "stops": reduction(base["stops"], nexus["stops"]),
-        }
+        nexus = row["nexus"]
+        row["reductions"] = {b: {
+            "completion_time": reduction(row[b]["completion_time"], nexus["completion_time"]),
+            "mean_task_time": reduction(row[b]["mean_task_time"], nexus["mean_task_time"]),
+            "stops": reduction(row[b]["stops"], nexus["stops"]),
+        } for b in baselines}
+        row["reduction"] = row["reductions"].get(primary, {})
         scenarios.append(row)
-    # Only scenarios where every run of BOTH strategies finished count toward
-    # the headline: a timed-out run has no real completion time.
-    valid = [s for s in scenarios if s["stop_and_wait"]["all_completed"] and s["nexus"]["all_completed"]]
-    excluded = [s["scenario"] for s in scenarios if s not in valid]
-    base_total = sum(s["stop_and_wait"]["completion_time"] or 0 for s in valid)
-    nexus_total = sum(s["nexus"]["completion_time"] or 0 for s in valid)
-    reductions = [s["reduction"]["completion_time"] for s in valid if s["reduction"]["completion_time"] is not None]
-    return {
-        "scenarios": scenarios,
-        "overall": {
+
+    def overall(base: str) -> Dict[str, Any]:
+        # Only scenarios where every run of both strategies finished count:
+        # a timed-out run has no real completion time.
+        valid = [s for s in scenarios if s[base]["all_completed"] and s["nexus"]["all_completed"]]
+        base_total = sum(s[base]["completion_time"] or 0 for s in valid)
+        nexus_total = sum(s["nexus"]["completion_time"] or 0 for s in valid)
+        reductions = [s["reductions"][base]["completion_time"] for s in valid
+                      if s["reductions"][base]["completion_time"] is not None]
+        return {
             "total_completion_reduction": round(1 - nexus_total / base_total, 4) if base_total else None,
             "mean_scenario_reduction": round(sum(reductions) / len(reductions), 4) if reductions else None,
             "worst_scenario_reduction": min(reductions) if reductions else None,
             "scenarios_counted": len(valid),
-            "excluded_timeouts": excluded,
-            "timeouts": {k: sum(1 for r in runs if r["strategy"] == k and not r["completed"]) for k in STRATEGIES},
-            "collisions": sum(s[k]["collisions"] for s in scenarios for k in STRATEGIES),
+            "excluded_timeouts": [s["scenario"] for s in scenarios if s not in valid],
+        }
+
+    by_baseline = {b: overall(b) for b in baselines}
+    return {
+        "scenarios": scenarios,
+        "strategies": present,
+        "baselines": baselines,
+        "primary": primary,
+        "overall": {
+            **(by_baseline.get(primary) or {}),
+            "by_baseline": by_baseline,
+            "timeouts": {k: sum(1 for r in runs if r["strategy"] == k and not r["completed"]) for k in present},
+            "collisions": sum(s[k]["collisions"] for s in scenarios for k in present),
             "target": 0.20,
         },
     }
@@ -367,27 +435,29 @@ def run_suite(names: List[str], seeds: int = 3, jobs: Optional[int] = None,
 def format_table(result: Dict[str, Any]) -> str:
     pct = lambda v: "—" if v is None else f"{v * 100:+.1f}%"
     num = lambda v, fmt="{:.1f}": "—" if v is None else fmt.format(v)
-    lines = [
-        f"{'Scenario':52s} {'Stop&wait':>10s} {'NEXUS':>10s} {'Reduction':>10s} {'Stops S&W':>10s} {'Stops NX':>9s} {'Collisions':>10s}",
-        "-" * 116,
-    ]
-    for s in result["summary"]["scenarios"]:
-        b, n = s["stop_and_wait"], s["nexus"]
-        flag = "" if b["all_completed"] and n["all_completed"] else "  (timeouts: not counted)"
+    summary = result["summary"]
+    present, baselines = summary["strategies"], summary["baselines"]
+    head = f"{'Scenario':46s}" + "".join(f"{LABELS[k]:>12s}" for k in present) \
+        + "".join(f"{'vs ' + SHORT[b]:>11s}" for b in baselines) + f"{'Stops':>18s}{'Coll.':>7s}"
+    lines = [head, "-" * len(head)]
+    for s in summary["scenarios"]:
+        done = all(s[k]["all_completed"] for k in present)
         lines.append(
-            f"{s['title'][:52]:52s} {num(b['completion_time']):>9s}s {num(n['completion_time']):>9s}s "
-            f"{pct(s['reduction']['completion_time']):>10s} {num(b['stops']):>10s} {num(n['stops']):>9s} "
-            f"{b['collisions'] + n['collisions']:>10d}{flag}")
-    o = result["summary"]["overall"]
-    lines += [
-        "-" * 116,
-        f"Over {o['scenarios_counted']} scenario(s) where every run finished: total task completion time reduction "
-        f"{pct(o['total_completion_reduction'])}   mean per scenario {pct(o['mean_scenario_reduction'])}   "
-        f"worst {pct(o['worst_scenario_reduction'])}   target {pct(o['target'])}",
-        f"Collisions: {o['collisions']}   timed-out runs: stop-and-wait {o['timeouts']['stop_and_wait']}, "
-        f"NEXUS {o['timeouts']['nexus']}"
-        + (f"   (not counted: {', '.join(o['excluded_timeouts'])})" if o["excluded_timeouts"] else ""),
-    ]
+            f"{s['title'][:46]:46s}" + "".join(f"{num(s[k]['completion_time']):>11s}s" for k in present)
+            + "".join(f"{pct(s['reductions'][b]['completion_time']):>11s}" for b in baselines)
+            + f"{' → '.join(num(s[k]['stops'], '{:.0f}') for k in present):>18s}"
+            + f"{sum(s[k]['collisions'] for k in present):>7d}" + ("" if done else "  (timeouts)"))
+    o = summary["overall"]
+    lines.append("-" * len(head))
+    for b in baselines:
+        ob = o["by_baseline"][b]
+        lines.append(
+            f"NEXUS vs {LABELS[b]} over {ob['scenarios_counted']} scenario(s): total completion time "
+            f"{pct(ob['total_completion_reduction'])}   mean per scenario {pct(ob['mean_scenario_reduction'])}   "
+            f"worst {pct(ob['worst_scenario_reduction'])}"
+            + (f"   (not counted, timeouts: {', '.join(ob['excluded_timeouts'])})" if ob["excluded_timeouts"] else ""))
+    lines.append(f"Target {pct(o['target'])}   collisions: {o['collisions']}   timed-out runs: "
+                 + ", ".join(f"{LABELS[k]} {o['timeouts'][k]}" for k in present))
     return "\n".join(lines)
 
 

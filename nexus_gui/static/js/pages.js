@@ -349,7 +349,7 @@ export class ReportsPage {
     const s = r.summary;
     const unit = s.mode === "missions" ? "missions" : "trips";
     $("#rp-meta").textContent = `${r.layout} · shift so far ${fmtDuration(r.shift_seconds)} (simulated) · ${s.robots} robots · generated ${new Date(r.generated_at).toLocaleTimeString()}`
-      + ` · coordination: ${s.strategy === "stop_and_wait" ? "stop & wait (classical baseline)" : "NEXUS"}`
+      + ` · coordination: ${STRATEGY_LABEL[s.strategy] || s.strategy}`
       + (r.estop ? " · E-STOP ENGAGED" : "");
 
     const tile = (label, value, sub, unitText = "") =>
@@ -460,7 +460,21 @@ function barChart(timeline, unit) {
 
 // ================================================================== benchmark
 
-const STRATEGY_LABEL = { stop_and_wait: "Stop & wait", nexus: "NEXUS" };
+export const STRATEGY_LABEL = { zone_lock: "Zone lock", stop_and_wait: "Stop & wait", nexus: "NEXUS" };
+const STRATEGY_COLOR = { zone_lock: "idle", stop_and_wait: "stopped", nexus: "moving" };  // category slots
+
+// Results files from before the zone-lock baseline had two strategies.
+function normalise(summary) {
+  const strategies = summary.strategies || ["stop_and_wait", "nexus"];
+  const baselines = summary.baselines || ["stop_and_wait"];
+  const primary = summary.primary || baselines[0];
+  for (const row of summary.scenarios) {
+    if (!row.reductions) row.reductions = { [primary]: row.reduction };
+  }
+  const o = summary.overall;
+  if (!o.by_baseline) o.by_baseline = { [primary]: o };
+  return { strategies, baselines, primary };
+}
 
 export class BenchmarkPage {
   constructor(ctx) {
@@ -530,71 +544,68 @@ export class BenchmarkPage {
     const r = d.result;
     if (!r) {
       $("#bm-meta").textContent = "No results yet";
-      $("#bm-body").innerHTML = `<section class="card"><div class="empty-state">Run the benchmark to compare NEXUS with the classical stop-and-wait protocol on the same layouts and orders.</div></section>${methodHtml()}`;
+      $("#bm-body").innerHTML = `<section class="card"><div class="empty-state">Run the benchmark to compare NEXUS with classical traffic control on the same layouts and orders.</div></section>${methodHtml()}`;
       return;
     }
+    const { strategies, baselines, primary } = normalise(r.summary);
     const o = r.summary.overall;
     const rows = r.summary.scenarios;
     const target = o.target ?? 0.2;
-    const counted = rows.filter((s) => s.stop_and_wait.all_completed && s.nexus.all_completed);
-    const meeting = counted.filter((s) => (s.reduction.completion_time ?? -1) >= target);
-    const stopsBase = rows.reduce((a, s) => a + (s.stop_and_wait.stops || 0), 0);
-    const stopsNexus = rows.reduce((a, s) => a + (s.nexus.stops || 0), 0);
+    const done = (s) => strategies.every((k) => s[k].all_completed);
+    const counted = rows.filter((s) => s[primary].all_completed && s.nexus.all_completed);
+    const meeting = counted.filter((s) => (s.reductions[primary].completion_time ?? -1) >= target);
+    const stops = (k) => rows.reduce((a, s) => a + (s[k].stops || 0), 0);
     const when = r.generated_at ? new Date(r.generated_at).toLocaleString() : "earlier run";
-    $("#bm-meta").textContent = `${rows.length} scenarios · ${r.seeds} seed${r.seeds === 1 ? "" : "s"} each · simulated, both strategies on identical layouts and orders · ${when} · computed in ${fmtDuration(r.wall_seconds)}`;
+    $("#bm-meta").textContent = `${rows.length} scenarios · ${r.seeds} seed${r.seeds === 1 ? "" : "s"} each · simulated, every strategy on identical layouts and orders · ${when} · computed in ${fmtDuration(r.wall_seconds)}`;
 
     const pct = (v, digits = 1) => (v === null || v === undefined ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(digits)}%`);
     const tile = (label, value, sub) => `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></div>`;
+    const headline = o.by_baseline[primary];
+    const second = baselines[1] ? o.by_baseline[baselines[1]] : null;
     const kpis = [
-      tile("Total completion time", pct(o.total_completion_reduction), `NEXUS vs stop-and-wait, ${o.scenarios_counted} scenarios`),
-      tile(`Scenarios ≥ ${Math.round(target * 100)}% faster`, `${meeting.length}<small>/ ${counted.length}</small>`, meeting.length ? meeting.map((s) => shortTitle(s.title)).join(" · ") : "none yet"),
-      tile("Full stops in traffic", stopsBase ? `${fmtPct(Math.abs(1 - stopsNexus / stopsBase))}<small>${stopsNexus <= stopsBase ? "fewer" : "more"}</small>` : "—",
-        `${fmtNumber(stopsNexus, 0)} with NEXUS vs ${fmtNumber(stopsBase, 0)} (per-scenario means, summed)`),
-      tile("Collisions", fmtNumber(o.collisions), o.collisions === 0 ? "none with either strategy" : "robots closer than 0.7 m"),
+      tile(`Faster than ${STRATEGY_LABEL[primary].toLowerCase()}`, pct(headline.total_completion_reduction),
+        `total completion time, ${headline.scenarios_counted} scenarios` + (second ? ` · ${pct(second.total_completion_reduction)} vs ${STRATEGY_LABEL[baselines[1]].toLowerCase()}` : "")),
+      tile(`Scenarios ≥ ${Math.round(target * 100)}% faster`, `${meeting.length}<small>/ ${counted.length}</small>`, `vs ${STRATEGY_LABEL[primary].toLowerCase()}`),
+      tile("Full stops in traffic", stops(primary) ? `${fmtPct(Math.abs(1 - stops("nexus") / stops(primary)))}<small>${stops("nexus") <= stops(primary) ? "fewer" : "more"}</small>` : "—",
+        strategies.map((k) => `${STRATEGY_LABEL[k]} ${fmtNumber(stops(k), 0)}`).join(" · ")),
+      tile("Collisions", fmtNumber(o.collisions), o.collisions === 0 ? "none with any strategy" : "robots closer than 0.7 m"),
     ].join("");
 
-    const met = o.total_completion_reduction !== null && o.total_completion_reduction >= target;
-    const timeouts = o.timeouts.stop_and_wait + o.timeouts.nexus;
+    const met = headline.total_completion_reduction !== null && headline.total_completion_reduction >= target;
+    const timeouts = strategies.reduce((a, k) => a + (o.timeouts[k] || 0), 0);
     const verdict = `
       <div class="bm-verdict ${met ? "met" : "short"}">
         <svg><use href="#${met ? "s-arrived" : "s-waiting"}"/></svg>
         <div>${met
-          ? `<b>Target met:</b> NEXUS finishes the same work ${pct(o.total_completion_reduction)} faster overall than stop-and-wait (target ${Math.round(target * 100)}%).`
-          : `<b>Target not met overall:</b> NEXUS finishes the same work ${pct(o.total_completion_reduction)} faster overall (target ${Math.round(target * 100)}%).`}
-          The gain is largest where paths overlap most; in light traffic both strategies are close, because there is little waiting to remove.
-          ${timeouts ? ` ${timeouts} run(s) timed out; scenarios with a timed-out run (${o.excluded_timeouts.map(escapeHtml).join(", ")}) are shown but not counted.` : ""}</div>
+          ? `<b>Target met:</b> NEXUS finishes the same work ${pct(headline.total_completion_reduction)} faster overall than ${STRATEGY_LABEL[primary].toLowerCase()} control (target ${Math.round(target * 100)}%).`
+          : `<b>Target not met overall:</b> NEXUS finishes the same work ${pct(headline.total_completion_reduction)} faster overall than ${STRATEGY_LABEL[primary].toLowerCase()} control (target ${Math.round(target * 100)}%).`}
+          The gap is largest where paths overlap most (choke points, shared aisles, cross traffic).
+          ${timeouts ? ` ${timeouts} run(s) timed out; scenarios with a timed-out run are shown but not counted.` : ""}</div>
       </div>`;
 
+    const legend = strategies.map((k) => `<span><i style="background:${categoryColor(STRATEGY_COLOR[k])}"></i>${STRATEGY_LABEL[k]}</span>`).join("");
     $("#bm-body").innerHTML = `
       <section class="report-kpis">${kpis}</section>
       ${verdict}
       <section class="card">
-        <div class="card-head"><h2>Time to finish every order</h2>
-          <div class="chart-legend"><span><i style="background:${categoryColor("idle")}"></i>Stop &amp; wait</span><span><i style="background:${categoryColor("moving")}"></i>NEXUS</span></div>
-        </div>
-        <div class="chart bm-chart">${compareChart(rows, target)}</div>
+        <div class="card-head"><h2>Time to finish every order</h2><div class="chart-legend">${legend}</div></div>
+        <div class="chart bm-chart">${compareChart(rows, strategies, primary, target)}</div>
       </section>
       <section class="card">
         <div class="card-head"><h2>Scenarios</h2><span class="card-hint">Watch replays the scenario live in Overview with the chosen strategy</span></div>
         <div class="table-wrap"><table class="data">
-          <thead><tr><th>Scenario</th><th class="num">Stop &amp; wait</th><th class="num">NEXUS</th><th class="num">Reduction</th>
+          <thead><tr><th>Scenario</th>${strategies.map((k) => `<th class="num">${STRATEGY_LABEL[k]}</th>`).join("")}
+            ${baselines.map((b) => `<th class="num">vs ${STRATEGY_LABEL[b].toLowerCase()}</th>`).join("")}
             <th class="num">Full stops</th><th class="num">Waiting share</th><th class="num">Collisions</th><th>Watch live</th></tr></thead>
-          <tbody>${rows.map((s) => {
-            const b = s.stop_and_wait, n = s.nexus;
-            const counts = b.all_completed && n.all_completed;
-            return `<tr>
-              <td class="wrap"><b>${escapeHtml(s.title)}</b>${counts ? "" : `<div class="muted">timed out: not counted</div>`}</td>
-              <td class="num">${fmtDuration(b.completion_time)}</td>
-              <td class="num">${fmtDuration(n.completion_time)}</td>
-              <td class="num"><b>${pct(s.reduction.completion_time)}</b></td>
-              <td class="num">${fmtNumber(b.stops, 0)} → ${fmtNumber(n.stops, 0)}</td>
-              <td class="num">${fmtPct(b.waiting_share, 1)} → ${fmtPct(n.waiting_share, 1)}</td>
-              <td class="num">${b.collisions + n.collisions}</td>
-              <td><span class="bm-watch">
-                <button class="btn" data-watch="${s.scenario}" data-strategy="stop_and_wait">Stop &amp; wait</button>
-                <button class="btn" data-watch="${s.scenario}" data-strategy="nexus">NEXUS</button>
-              </span></td></tr>`;
-          }).join("")}</tbody>
+          <tbody>${rows.map((s) => `<tr>
+              <td class="wrap"><b>${escapeHtml(s.title)}</b>${done(s) ? "" : `<div class="muted">timed out: not counted</div>`}</td>
+              ${strategies.map((k) => `<td class="num">${fmtDuration(s[k].completion_time)}</td>`).join("")}
+              ${baselines.map((b) => `<td class="num">${b === primary ? "<b>" : ""}${pct(s.reductions[b].completion_time)}${b === primary ? "</b>" : ""}</td>`).join("")}
+              <td class="num">${strategies.map((k) => fmtNumber(s[k].stops, 0)).join(" → ")}</td>
+              <td class="num">${strategies.map((k) => fmtPct(s[k].waiting_share, 0)).join(" → ")}</td>
+              <td class="num">${strategies.reduce((a, k) => a + s[k].collisions, 0)}</td>
+              <td><span class="bm-watch">${strategies.map((k) =>
+                `<button class="btn" data-watch="${s.scenario}" data-strategy="${k}">${STRATEGY_LABEL[k].replace("&", "&amp;")}</button>`).join("")}</span></td></tr>`).join("")}</tbody>
         </table></div>
       </section>
       ${methodHtml()}`;
@@ -610,25 +621,28 @@ function methodHtml() {
     <section class="card">
       <div class="card-head"><h2>How the comparison works</h2></div>
       <div class="bm-method">
-        Both strategies run the same layout, robots and order list (same random seed). Only the coordination differs; the safety layer (cell reservations, deadlock back-off) is shared, so both must reach zero collisions.
+        Every strategy runs the same layout, robots and order list (same random seed). Only the traffic control differs; the safety layer (cell reservations, deadlock back-off) is shared, so all must reach zero collisions.
         <ul>
-          <li><b>Stop &amp; wait (classical):</b> fixed priority by robot ID. The lower-priority robot drives up to the shared stretch of path, stops, and waits until the other robot has cleared all of it. No rerouting, no speed adaptation.</li>
-          <li><b>NEXUS:</b> peer-to-peer negotiation (first to arrive goes first). The robot that gives way slows down to cross just behind the other instead of stopping, changes lanes when that is quicker than waiting, and never accepts an order that would close a wait loop.</li>
-          <li><b>Metric:</b> total task completion time, i.e. when the last order is delivered. Reduction = 1 − NEXUS / stop-and-wait. Scenarios with a timed-out run are not counted.</li>
+          <li><b>Zone lock (classical AGV block control):</b> junctions and two-way stretches are cut into 3 × 3 m blocks, one robot per block. At every block boundary the robot stops, requests the block (1 s handshake) and waits until it is granted; it claims the whole stretch up to the next one-way lane at once. Fixed shortest routes, fixed priority by robot number, no negotiation, no rerouting.</li>
+          <li><b>Stop &amp; wait:</b> fixed priority by robot number. The lower-priority robot drives up to the shared stretch of path, stops, and waits until the other robot has cleared all of it. No rerouting, no speed adaptation.</li>
+          <li><b>NEXUS:</b> peer-to-peer negotiation (first to arrive goes first); the robot that gives way slows to cross just behind the other instead of stopping; lane changes when quicker than waiting; wait-loop-free crossing order; space-time route planning around the paths its peers broadcast.</li>
+          <li><b>Metric:</b> total task completion time, i.e. when the last order is delivered. Reduction = 1 − NEXUS / baseline. Scenarios with a timed-out run are not counted.</li>
         </ul>
       </div>
     </section>`;
 }
 
-// Grouped horizontal bars: stop-and-wait vs NEXUS per scenario, reduction on the right.
-function compareChart(rows, target) {
-  const width = 1200, rowH = 46, barH = 15, left = 300, right = 190, top = 8, bottom = 24;
+// Grouped horizontal bars: one per strategy per scenario, reduction vs the
+// primary baseline on the right.
+function compareChart(rows, strategies, primary, target) {
+  const barH = 13, gap = 2;
+  const rowH = strategies.length * (barH + gap) + 16;
+  const width = 1200, left = 300, right = 190, top = 8, bottom = 24;
   const height = top + rows.length * rowH + bottom;
   const innerW = width - left - right;
-  const values = rows.flatMap((s) => [s.stop_and_wait.completion_time || 0, s.nexus.completion_time || 0]);
+  const values = rows.flatMap((s) => strategies.map((k) => s[k].completion_time || 0));
   const { max, ticks } = niceScale(Math.max(...values, 1), 4);
   const x = (v) => left + (v / max) * innerW;
-  const base = categoryColor("idle"), ours = categoryColor("moving");
   const grid = ticks.map((t) => `<line x1="${x(t)}" x2="${x(t)}" y1="${top}" y2="${height - bottom}"/>`).join("");
   const axis = ticks.map((t) => `<text x="${x(t)}" y="${height - 6}" text-anchor="middle">${fmtNumber(t)} s</text>`).join("");
   const bar = (y, v, color, label) => {
@@ -641,15 +655,16 @@ function compareChart(rows, target) {
   };
   const body = rows.map((s, i) => {
     const y0 = top + i * rowH + 6;
-    const red = s.reduction.completion_time;
-    const counted = s.stop_and_wait.all_completed && s.nexus.all_completed;
+    const red = s.reductions[primary]?.completion_time ?? null;
+    const counted = s[primary].all_completed && s.nexus.all_completed;
     const redText = red === null ? "—" : `${red >= 0 ? "+" : "−"}${Math.abs(red * 100).toFixed(1)}%`;
     const redColor = !counted ? "var(--muted)" : red >= target ? "var(--good)" : "var(--text)";
+    const mid = y0 + (strategies.length * (barH + gap)) / 2 + 4;
     return `
-      <text class="bm-label" x="${left - 10}" y="${y0 + barH + 2}" text-anchor="end">${shortTitle(s.title)}</text>
-      ${bar(y0, s.stop_and_wait.completion_time, base, `${escapeHtml(s.title)} · stop &amp; wait`)}
-      ${bar(y0 + barH + 2, s.nexus.completion_time, ours, `${escapeHtml(s.title)} · NEXUS`)}
-      <text class="bm-red" x="${width - 4}" y="${y0 + barH + 2}" text-anchor="end" fill="${redColor}">${counted ? redText : "n/c"}</text>`;
+      <text class="bm-label" x="${left - 10}" y="${mid}" text-anchor="end">${shortTitle(s.title)}</text>
+      ${strategies.map((k, n) => bar(y0 + n * (barH + gap), s[k].completion_time, categoryColor(STRATEGY_COLOR[k]),
+        `${escapeHtml(s.title)} · ${STRATEGY_LABEL[k].replace("&", "&amp;")}`)).join("")}
+      <text class="bm-red" x="${width - 4}" y="${mid}" text-anchor="end" fill="${redColor}">${counted ? redText : "n/c"}</text>`;
   }).join("");
   return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Completion time per scenario">
     <g class="grid">${grid}</g><g class="axis">${axis}</g>

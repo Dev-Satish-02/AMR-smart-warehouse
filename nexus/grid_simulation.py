@@ -40,6 +40,7 @@ from algorithms.fast_conflict_detector import FastConflictDetector
 from algorithms.lane_grid import LaneGrid
 from algorithms.negotiation import NegotiationManager
 from algorithms.planner import NEXUSPlanner
+from algorithms.spacetime import SpaceTimePlanner
 from communication.p2p import P2PNetwork
 from nexus.alerts import AlertManager
 from nexus.fleet import FleetManager
@@ -66,6 +67,17 @@ FLOW_WINDOW = 12          # cells of a give-way robot's path checked against the
 FLOW_MIN_SPEED = 0.2      # m/s: a give-way robot slows to no less than this while it can still roll
 FLOW_MARGIN = 0.4         # s arrival margin after the other robot has cleared the crossing
 FLOW_TIMEOUT = 30.0       # s before a crossing order is dropped (the deadlock layer takes over)
+ST_ENABLED = True
+ST_REPLAN_EVERY = 3.0     # s between a NEXUS robot's space-time route re-checks while driving
+ST_SWITCH_GAIN = 1.5      # s a new space-time route must save to be taken
+ZONE_SIZE = 3             # zone-lock baseline: blocks of ZONE_SIZE x ZONE_SIZE cells
+ZONE_HANDSHAKE = 1.0      # s at a standstill at a zone control point to request the zone
+ST_HOLD = 60.0            # s a standing robot is assumed to keep its cell in peers' plans
+
+
+class _TimedPath(list):
+    """A path (list of points) that also carries its space-time plan."""
+    times: List[float]
 
 
 class RoutePlanner:
@@ -116,6 +128,12 @@ class GridSimulation:
 
         self.grid = LaneGrid(layout, turn_penalty=float(sim["turn_penalty"]))
         self.planner = NEXUSPlanner(grid=self.grid)
+        self.st_planner = SpaceTimePlanner(layout, speed=float(sim["max_speed"]),
+                                           angular_speed=float(sim["angular_speed"]))
+        # Broadcast timed plans: robot -> {"path": id of its path, "times": [t per path point]}
+        self.st_plans: Dict[str, Dict[str, Any]] = {}
+        # Zone-lock baseline: block -> robot it has been granted to.
+        self.zone_grants: Dict[Any, str] = {}
         # Same results as NEXUS's ConflictDetector, computed faster (see
         # algorithms/fast_conflict_detector.py).
         self.detector = FastConflictDetector(
@@ -253,6 +271,15 @@ class GridSimulation:
         for agent in self.agents:
             agent.update(0.0)
             self.reservations.reserve(agent.robot_id, self._cell(agent.state.position))
+        if self.strategy == "nexus":
+            # Prioritised space-time planning: each robot plans around the
+            # ones that planned before it.
+            for agent in self.agents:
+                meta = self.meta[agent.robot_id]
+                if meta["mode"] == "fixed" and not meta["error"] and not agent.planner.remaining_via():
+                    path = self._plan(agent, np.array(self.layout.cell_center(meta["goal_cell"])))
+                    if path:
+                        self._install_path(agent, path)
 
     # ==================================================================
     # HELPERS
@@ -355,7 +382,7 @@ class GridSimulation:
         agent.set_task(task_id=agent.state.task_id, goal=goal)
         if agent.robot_id in self.yielding:
             return True
-        path = agent.planner.plan(agent.state.position, goal)
+        path = self._plan(agent, goal)
         if not path:
             return False
         self._install_path(agent, path)
@@ -365,7 +392,10 @@ class GridSimulation:
 
     def _install_path(self, agent: RobotAgent, path: List[np.ndarray]):
         self.meta[agent.robot_id]["arrival_logged"] = False
+        timed = getattr(path, "times", None)
         agent.set_path(path)
+        if timed is not None:
+            self.st_plans[agent.robot_id] = {"path": id(agent.planned_path), "times": list(timed)}
         agent.advance_waypoint()
         if agent.waypoint_index < len(agent.planned_path):
             agent.intent = "MOVING"
@@ -391,6 +421,9 @@ class GridSimulation:
         for agent in self.agents:
             self._progress(agent, now)
         self.fleet.update(now)
+
+        if self.strategy == "nexus" and ST_ENABLED and ST_REPLAN_EVERY > 0:
+            self._st_replan(now)
 
         # 3. Predictive conflicts -> negotiation -> reroute / stop --------
         self._release_conflicts(now)
@@ -469,7 +502,7 @@ class GridSimulation:
             planner.next_via = 0 if meta["outbound"] else len(planner.via)
             goal = np.array(self.layout.cell_center(meta["goal_cell"]))
             agent.set_task(task_id=agent.state.task_id, goal=goal)
-            path = planner.plan(agent.state.position, goal)
+            path = self._plan(agent, goal)
             if path:
                 self._install_path(agent, path)
             else:
@@ -512,7 +545,7 @@ class GridSimulation:
     # ------------------------------------------------------------------
 
     def _release_conflicts(self, now: float):
-        if self.strategy == "stop_and_wait":
+        if self.strategy in ("stop_and_wait", "zone_lock"):
             self._release_stop_and_wait(now)
             return
         # Flow-through: the crossing order ends the moment the winner's body
@@ -538,6 +571,8 @@ class GridSimulation:
         if self.strategy == "stop_and_wait":
             self._negotiate_stop_and_wait(conflicts, now)
             return
+        if self.strategy == "zone_lock":
+            return  # block control only: no negotiation at all
         for conflict in conflicts:
             pair = tuple(sorted([conflict.robot_a, conflict.robot_b]))
             if pair in self.active_conflicts:
@@ -596,6 +631,107 @@ class GridSimulation:
                 position=[float(v) for v in conflict.conflict_position],
                 pair=[a.robot_id, b.robot_id],
             )
+
+    # ------------------------------------------------------------------
+    # Space-time planning (NEXUS)
+    # ------------------------------------------------------------------
+
+    def _heading_index(self, agent: RobotAgent) -> int:
+        h = agent.robot.heading
+        return int(round(h / (np.pi / 2.0))) % 4
+
+    def _timelines(self, now: float, exclude: str) -> Dict[Cell, List[Tuple[float, float]]]:
+        """What every other robot has broadcast: per cell, when it will be
+        there. Moving robots: their timed plan (shifted by how late they
+        are) or their path at nominal speed; standing robots hold their cell."""
+        c = self.st_planner.clearance
+        table: Dict[Cell, List[Tuple[float, float]]] = {}
+        speed = self.world.max_speed
+        for other in self.agents:
+            if other.robot_id == exclude:
+                continue
+            body = self._occupied(other)
+            upcoming = self._upcoming(other)
+            if not upcoming or other.robot.speed < 1e-3 and self.meta[other.robot_id]["status"] in (
+                    "ARRIVED", "DOCKED", "PARKED", "IDLE", "CHARGING", "HELD", "ERROR"):
+                for cell in body:
+                    table.setdefault(cell, []).append((now - c, now + ST_HOLD))
+                continue
+            for cell in body:
+                table.setdefault(cell, []).append((now - c, now + c))
+            plan = self.st_plans.get(other.robot_id)
+            times = None
+            if plan and plan["path"] == id(other.planned_path) and len(plan["times"]) == len(other.planned_path):
+                k = upcoming[0][0]
+                eta_k = now + self._distance_to(other, k) / speed
+                shift = eta_k - plan["times"][k]
+                times = [plan["times"][j] + shift for j, _ in upcoming]
+            if times is None:
+                times, t, prev = [], now, other.state.position
+                for j, cell in upcoming:
+                    t += float(np.linalg.norm(other.planned_path[j] - prev)) / speed
+                    prev = other.planned_path[j]
+                    times.append(t)
+            for (j, cell), t in zip(upcoming, times):
+                table.setdefault(cell, []).append((t - c, t + c))
+            # Where it ends up (a lane cell, not a station): held afterwards.
+            last = upcoming[-1][1]
+            if not self.layout.is_station(last):
+                table.setdefault(last, []).append((times[-1], times[-1] + ST_HOLD))
+        from algorithms.spacetime import merge
+        return {cell: merge(iv) for cell, iv in table.items()}
+
+    def _plan(self, agent: RobotAgent, goal: np.ndarray):
+        """Route to goal. NEXUS plans in space-time around its peers'
+        broadcast plans; the baselines (and via-point routes) use plain A*."""
+        if self.strategy != "nexus" or agent.planner.remaining_via() or not ST_ENABLED:
+            return agent.planner.plan(agent.state.position, goal)
+        now = self.world.time
+        start, target = self._cell(agent.state.position), self._cell(goal)
+        reserved = self._timelines(now, agent.robot_id)
+        # Our own body is never an obstacle to ourselves.
+        timed = self.st_planner.plan(start, target, now, reserved, self._heading_index(agent))
+        if not timed:
+            return agent.planner.plan(agent.state.position, goal)
+        path = _TimedPath(np.array(self.layout.cell_center(cell)) for cell, _ in timed)
+        path.times = [t for _, t in timed]
+        return path
+
+    def _st_replan(self, now: float):
+        """Every ST_REPLAN_EVERY s a driving robot re-checks its route
+        against the latest broadcast plans and switches if a route that
+        avoids the traffic ahead arrives clearly earlier."""
+        for agent in self.agents:
+            meta = self.meta[agent.robot_id]
+            if agent.robot_id in self.yielding or agent.stopped or meta["hold"] or self.estop:
+                continue
+            if meta["status"] not in ("MOVING", "TURNING", "WAITING", "REROUTING") or agent.state.goal is None:
+                continue
+            if agent.planner.remaining_via() or not self._at_center(agent):
+                continue
+            if now - meta.get("st_checked", -1e9) < ST_REPLAN_EVERY:
+                continue
+            meta["st_checked"] = now
+            upcoming = self._upcoming(agent)
+            if len(upcoming) < 3:
+                continue
+            start = self._cell(agent.state.position)
+            reserved = self._timelines(now, agent.robot_id)
+            current = [start] + [c for _, c in upcoming if c != start]
+            arrive_now = self.st_planner.time_path(current, now, reserved, self._heading_index(agent))[-1][1]
+            timed = self.st_planner.plan(start, current[-1], now, reserved, self._heading_index(agent))
+            if not timed or timed[-1][1] > arrive_now - ST_SWITCH_GAIN:
+                continue
+            if [c for c, _ in timed] == current:
+                continue
+            path = _TimedPath(np.array(self.layout.cell_center(cell)) for cell, _ in timed)
+            path.times = [t for _, t in timed]
+            self._install_path(agent, path)
+            agent.intent = "REROUTING"
+            self.counters["reroutes"] += 1
+            meta["reroute_flash"] = now + 1.5
+            self._event("reroute", f"{agent.robot_id} takes a less busy route "
+                        f"(arrives {arrive_now - timed[-1][1]:.1f}s sooner)", agent.robot_id)
 
     # ------------------------------------------------------------------
     # Flow-through crossing (NEXUS)
@@ -876,7 +1012,12 @@ class GridSimulation:
                 self.reservations.reserve(agent.robot_id, cell)
 
         gates = self._gates()
-        order = sorted(range(len(self.agents)), key=lambda i: self._priority(self.agents[i]))
+        zones = self._zone_holders() if self.strategy == "zone_lock" else None
+        if zones is not None:
+            # Classical block control: fixed priority by robot number.
+            order = sorted(range(len(self.agents)), key=lambda i: self.reservations.priority_key(0.0, self.agents[i].robot_id))
+        else:
+            order = sorted(range(len(self.agents)), key=lambda i: self._priority(self.agents[i]))
         for i in order:
             agent = self.agents[i]
             meta = self.meta[agent.robot_id]
@@ -885,6 +1026,7 @@ class GridSimulation:
             chain: List[int] = []
             blocked_by = None
             gated = gates.get(agent.robot_id, {})
+            meta["zone_stop"] = False
 
             for j, cell in upcoming:
                 if cell in body:
@@ -898,6 +1040,38 @@ class GridSimulation:
                     # Crossing order: wait for the winner to clear this cell.
                     blocked_by = gated[cell]
                     break
+                if zones is not None and agent.robot_id not in self.yielding \
+                        and self._zone(cell) is not None and zones.get(self._zone(cell)) != agent.robot_id:
+                    # Entering a block system: claim every block up to the
+                    # next exit at once, or stop dead at the boundary.
+                    # Zone control point: come to a standstill at the boundary
+                    # and request the zone (ZONE_HANDSHAKE s), free or not.
+                    at_boundary = all(self._cell(agent.planned_path[k]) in body for k in chain) \
+                        and agent.robot.speed < 1e-3 and self._at_center(agent)
+                    if not at_boundary:
+                        break
+                    meta["zone_stop"] = True
+                    run = []
+                    for _, c in upcoming[upcoming.index((j, cell)):]:
+                        zone = self._zone(c)
+                        if zone is None:
+                            break
+                        if zone not in run:
+                            run.append(zone)
+                    holder = next((zones[z] for z in run if zones.get(z) not in (None, agent.robot_id)), None)
+                    if holder is not None:
+                        meta["zone_request"] = None
+                        blocked_by = holder
+                        break
+                    if meta.get("zone_request") is None:
+                        meta["zone_request"] = now
+                    if now - meta["zone_request"] < ZONE_HANDSHAKE - 1e-9:
+                        break
+                    meta["zone_request"] = None
+                    meta["zone_stop"] = False
+                    for zone in run:
+                        zones[zone] = agent.robot_id
+                        self.zone_grants[zone] = agent.robot_id
                 if not self.reservations.reserve(agent.robot_id, cell):
                     blocked_by = self.reservations.holder(cell)
                     break
@@ -971,6 +1145,35 @@ class GridSimulation:
                 self._event("backoff", f"{blocker_id} makes way for {robot_id}", blocker_id)
             else:
                 meta["blocked_since"] = now  # try again later
+
+    def _zone(self, cell: Cell):
+        """Zone-lock baseline: the ZONE_SIZE x ZONE_SIZE block a two-way /
+        junction cell belongs to. One-way lanes and stations are outside the
+        block system (robots queue there on cell reservations)."""
+        if self.layout.is_station(cell) or self.layout.direction(cell) is not None or not self.layout.is_drivable(cell):
+            return None
+        return (cell[0] // ZONE_SIZE, cell[1] // ZONE_SIZE)
+
+    def _zone_holders(self) -> Dict[Any, str]:
+        """Blocks held now: granted runs (until the robot has passed them)
+        and the blocks robots stand in. One robot per block. A robot backing
+        off out of a deadlock is outside the block system."""
+        for zone, robot_id in list(self.zone_grants.items()):
+            agent = self._agent(robot_id)
+            # Released once the robot is out of the block and not about to
+            # use it again (a route that comes back later claims it again).
+            still = {self._zone(c) for c in list(self._occupied(agent)) + self._remaining_cells(agent)[:2 * ZONE_SIZE + 2]}
+            if robot_id in self.yielding or zone not in still:
+                del self.zone_grants[zone]
+        holders: Dict[Any, str] = dict(self.zone_grants)
+        for agent in self.agents:
+            if agent.robot_id in self.yielding:
+                continue
+            for cell in self._occupied(agent):
+                zone = self._zone(cell)
+                if zone is not None:
+                    holders.setdefault(zone, agent.robot_id)
+        return holders
 
     def _to_bay(self, robot_id: str, now: float) -> bool:
         """Backing off, but stuck on the way to its bay for a while."""
@@ -1095,12 +1298,16 @@ class GridSimulation:
             if agent.waypoint_index < len(agent.planned_path):
                 continue  # still driving to the bay
             goal = np.array(self.layout.cell_center(meta["goal_cell"]))
-            path = agent.planner.plan(agent.state.position, goal)
+            path = self._plan(agent, goal)
             if not path:
                 continue
             winner_cells = set(self._remaining_cells(winner)) | set(self._occupied(winner))
             ahead = {self._cell(p) for p in path[: 2 * self.lookahead + 2]}
-            clear = not (ahead & winner_cells) or winner.intent == "ARRIVED" and not (ahead & set(self._occupied(winner)))
+            if self.strategy == "zone_lock":
+                # Blocks, not cells: wait until the winner needs none of ours.
+                winner_cells = {self._zone(c) for c in winner_cells} - {None}
+                ahead = {self._zone(c) for c in ahead} - {None}
+            clear = not (ahead & winner_cells) or winner.intent == "ARRIVED" and not ({self._cell(p) for p in path[:3]} & set(self._occupied(winner)))
             if clear or now - info["since"] > YIELD_TIMEOUT:
                 del self.yielding[robot_id]
                 agent.set_task(task_id=agent.state.task_id, goal=goal)
@@ -1149,7 +1356,7 @@ class GridSimulation:
                 status = "PARKED"
             elif agent.intent == "ARRIVED":
                 status = "ARRIVED"
-            elif meta["blocked_by"] is not None and robot.speed < 1e-3 and not robot.turning:
+            elif (meta["blocked_by"] is not None or meta.get("zone_stop")) and robot.speed < 1e-3 and not robot.turning:
                 status = "WAITING"
             elif now < meta["reroute_flash"]:
                 status = "REROUTING"
@@ -1164,9 +1371,15 @@ class GridSimulation:
                 meta["time_in"][TIME_CATEGORY.get(status, "idle")] += self.time_step
                 # A full stop: braking to a standstill because of traffic
                 # (not at a station, a turn, a hold or an E-stop).
-                if status in ("WAITING", "YIELDING") and robot.speed < 1e-3 and meta["last_speed"] > 0.05:
+                if robot.speed < 1e-3 and meta["last_speed"] > 0.05:
+                    meta["halted_at"] = now
+                halted = meta.get("halted_at")
+                if halted is not None and status in ("WAITING", "YIELDING") and now - halted <= 0.3 + 1e-9:
                     meta["stops"] += 1
                     self.counters["stops"] += 1
+                    meta["halted_at"] = None
+                elif halted is not None and now - halted > 0.3 + 1e-9:
+                    meta["halted_at"] = None
                 meta["last_speed"] = robot.speed
             if status in ("WAITING", "YIELDING"):
                 if meta["stall_since"] is None:

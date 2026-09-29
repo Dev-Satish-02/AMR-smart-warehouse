@@ -108,7 +108,7 @@ class Controller:
             self.sim.fleet.create(pickup, dropoff, "normal", now=0.0)
         self.sim._event("system", f"Benchmark replay: {len(tasks) or len(self.sim.agents)} "
                         f"{'orders' if tasks else 'robot trips'}, seed {seed}, "
-                        f"strategy {'NEXUS' if self.sim.strategy == 'nexus' else 'stop-and-wait'}")
+                        f"strategy {benchmark.LABELS.get(self.sim.strategy, self.sim.strategy)}")
         self.running = False
         self.sent_events = 0
 
@@ -129,7 +129,7 @@ class Controller:
             w["done"] = True
             self.running = False
             self.sim._event("system", f"All {len(w['tasks'])} orders delivered in {self.sim.time:.1f} s "
-                            f"({'NEXUS' if self.sim.strategy == 'nexus' else 'stop-and-wait'})")
+                            f"({benchmark.LABELS.get(self.sim.strategy, self.sim.strategy)})")
 
     def layout_message(self) -> Dict[str, Any]:
         layout = self.sim.layout

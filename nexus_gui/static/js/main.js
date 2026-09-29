@@ -2,7 +2,7 @@ import { MapView } from "./map.js";
 import { Editor, dialog } from "./editor.js";
 import { loadCatalog, objectType } from "./catalog.js";
 import { displayColor, STATUS, ACTIVITY, fmtDuration } from "./format.js";
-import { MissionsPage, FleetPage, AlertsPage, ReportsPage, BenchmarkPage, initTooltips, hideTooltip, renderAlertBadge } from "./pages.js";
+import { MissionsPage, FleetPage, AlertsPage, ReportsPage, BenchmarkPage, STRATEGY_LABEL, initTooltips, hideTooltip, renderAlertBadge } from "./pages.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -491,7 +491,7 @@ function initControls() {
     const button = event.target.closest("button");
     if (!button || button.dataset.value === app.strategy) return;
     send("strategy", { value: button.dataset.value });
-    toast(`Coordination: ${button.dataset.value === "nexus" ? "NEXUS" : "stop & wait (classical baseline)"}. Layout restarted.`);
+    toast(`Coordination: ${STRATEGY_LABEL[button.dataset.value]}${button.dataset.value === "nexus" ? "" : " (classical baseline)"}. Layout restarted.`);
   });
   $("#btn-estop").addEventListener("click", () => {
     if (app.latest?.estop) releaseEstop();
@@ -629,7 +629,7 @@ const pageContext = {
   watchBenchmark: (scenario, strategy) => {
     send("benchmark.watch", { scenario, strategy });
     setMode("live");
-    toast(`Replaying ${scenario.replace(/_/g, " ")} with ${strategy === "nexus" ? "NEXUS" : "stop & wait"}: press Play`);
+    toast(`Replaying ${scenario.replace(/_/g, " ")} with ${STRATEGY_LABEL[strategy]}: press Play`);
   },
 };
 const pages = {
